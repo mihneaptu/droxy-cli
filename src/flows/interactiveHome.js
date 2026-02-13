@@ -6,6 +6,15 @@ const {
   normalizeText,
 } = require("./interactiveHelpers");
 
+function buildSelectedModelsSummary(selectedModelsCount, thinkingModelsCount) {
+  const summary = `Selected models: ${selectedModelsCount}`;
+  if (thinkingModelsCount <= 0) return summary;
+  if (selectedModelsCount === 1 && thinkingModelsCount === 1) {
+    return `${summary} (with thinking)`;
+  }
+  return `${summary} (${thinkingModelsCount} with thinking)`;
+}
+
 function buildHomeTitle(output, context) {
   const selectedProvider = normalizeText(context.selectedProvider) || "not selected";
   const selectedModelsCount = Number(context.selectedModelsCount) || 0;
@@ -17,8 +26,7 @@ function buildHomeTitle(output, context) {
     output.dim("Manual setup flow with explicit provider/model selection"),
     output.dim(`Config: ${configState} | Proxy: ${proxyState}`),
     output.dim(`Provider: ${selectedProvider}`),
-    output.dim(`Selected models: ${selectedModelsCount}`),
-    output.dim(`Thinking models: ${thinkingModelsCount}`),
+    output.dim(buildSelectedModelsSummary(selectedModelsCount, thinkingModelsCount)),
   ].join("\n");
 }
 
