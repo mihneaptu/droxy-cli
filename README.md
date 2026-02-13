@@ -11,10 +11,11 @@ Minimal Droxy CLI MVP focused on proxy lifecycle, login, and Droid sync.
 
 ```bash
 droxy
-droxy start|up [--quiet]
-droxy stop|down [--force] [--quiet]
-droxy status|st [--check] [--json] [--verbose] [--quiet]
-droxy login|connect|c [provider] [--with-models|--skip-models] [--quiet]
+droxy start [--quiet]
+droxy stop [--force] [--quiet]
+droxy status [--check] [--json] [--verbose] [--quiet]
+droxy login [provider] [--with-models|--skip-models] [--quiet]
+droxy connect [provider] [--with-models|--skip-models] [--quiet]
 droxy help
 droxy version
 ```
@@ -27,8 +28,6 @@ droxy version
 - `droxy`: interactive setup (recommended for first run)
 - `droxy login`: primary non-interactive login flow
 - `droxy connect`: compatibility alias for `droxy login`
-- `droxy c`: short alias for `droxy login`
-- `droxy up|down|st`: quick aliases for start/stop/status
 
 Interactive flow:
 

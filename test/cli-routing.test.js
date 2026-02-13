@@ -64,30 +64,6 @@ test("routes start/stop/status commands", async () => {
   ]]);
 });
 
-test("routes power-user aliases for start/stop/status/login", async () => {
-  const up = createDeps();
-  await runCli(["up", "--quiet"], up.deps);
-  assert.deepEqual(up.calls, [["startProxy", { quiet: true, allowAttach: true }]]);
-
-  const down = createDeps();
-  await runCli(["down", "--force", "--quiet"], down.deps);
-  assert.deepEqual(down.calls, [["stopProxy", { force: true, quiet: true }]]);
-
-  const st = createDeps();
-  await runCli(["st", "--json"], st.deps);
-  assert.deepEqual(st.calls, [[
-    "statusProxy",
-    { check: false, json: true, verbose: false, quiet: false },
-  ]]);
-
-  const c = createDeps();
-  await runCli(["c", "claude", "--skip-models", "--quiet"], c.deps);
-  assert.deepEqual(c.calls, [[
-    "loginFlow",
-    { providerId: "claude", selectModels: false, quiet: true },
-  ]]);
-});
-
 test("routes login/connect with automatic model sync defaults", async () => {
   const login = createDeps();
   await runCli(["login", "claude"], login.deps);
@@ -169,20 +145,6 @@ test("help and version aliases log expected output", async () => {
   assert.equal(help.calls[0][0], "log");
   assert.match(help.calls[0][1], /Droxy CLI v0.1.0/);
 
-  const shortHelp = createDeps();
-  await runCli(["help", "--short"], shortHelp.deps);
-  assert.equal(
-    shortHelp.calls.some((entry) => entry[0] === "log" && /Quick usage:/.test(entry[1])),
-    true
-  );
-
-  const verboseHelp = createDeps();
-  await runCli(["help", "--verbose"], verboseHelp.deps);
-  assert.equal(
-    verboseHelp.calls.some((entry) => entry[0] === "log" && /Verbose troubleshooting:/.test(entry[1])),
-    true
-  );
-
   const version = createDeps();
   await runCli(["--version"], version.deps);
   assert.deepEqual(version.calls, [["log", "0.1.0"]]);
@@ -203,7 +165,7 @@ test("unknown command prints suggestion and help", async () => {
       true
     );
     assert.equal(
-      target.calls.some((entry) => /Quick start:/.test(entry[1]) || /Droxy CLI/.test(entry[1])),
+      target.calls.some((entry) => /Usage:/.test(entry[1]) || /Droxy CLI/.test(entry[1])),
       true
     );
   } finally {
