@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible problem in droxy-cli
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking time to report this.
+        Beginner reports are welcome. Clear steps help us fix things faster.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened and what you expected.
+      placeholder: Briefly describe the issue and expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact commands and sequence.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 / macOS 15 / Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      placeholder: node -v output
+    validations:
+      required: true
+
+  - type: input
+    id: droxy
+    attributes:
+      label: Droxy version
+      placeholder: droxy --version
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / errors (redacted)
+      description: Paste relevant output and remove secrets.
+      render: shell
+    validations:
+      required: true

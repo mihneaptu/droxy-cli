@@ -1,0 +1,44 @@
+{
+  "name": "droxy-cli",
+  "version": "0.1.0",
+  "description": "Connect browser-authenticated AI subscriptions to Droid through a local OpenAI-compatible proxy.",
+  "license": "MIT",
+  "private": false,
+  "type": "commonjs",
+  "homepage": "https://github.com/mihneaptu/droxy-cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mihneaptu/droxy-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mihneaptu/droxy-cli/issues"
+  },
+  "keywords": [
+    "droid",
+    "cli",
+    "proxy",
+    "openai-compatible",
+    "oauth"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "droxy": "droxy.js"
+  },
+  "files": [
+    "droxy.js",
+    "src/**",
+    "test/**",
+    "vendor/**",
+    "droxy.cmd",
+    "README.md",
+    "LICENSE",
+    "install.ps1",
+    "install.sh"
+  ],
+  "scripts": {
+    "start": "node droxy.js",
+    "test": "node --test test/*.test.js"
+  }
+}

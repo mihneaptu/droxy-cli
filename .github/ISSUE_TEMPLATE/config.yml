@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support guide
+    url: https://github.com/mihneaptu/droxy-cli/blob/main/SUPPORT.md
+    about: Check support expectations and what details to include.
+  - name: Security reports
+    url: https://github.com/mihneaptu/droxy-cli/security/advisories/new
+    about: Please report vulnerabilities privately.

@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+.env
+DroxyCLI.state.json
+dist/
+*.tgz
+vendor/*.exe
+vendor/*.bin
+*.log
+.factory-plugin/
+droxy-state.json

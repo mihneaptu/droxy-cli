@@ -1,0 +1,40 @@
+name: Release checklist
+description: Track readiness for an upcoming release
+title: "[release] "
+labels:
+  - documentation
+body:
+  - type: input
+    id: target
+    attributes:
+      label: Target tag
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: quality
+    attributes:
+      label: Quality checks
+      options:
+        - label: `node droxy.js --help` runs successfully
+        - label: `npm pack --dry-run` output reviewed
+        - label: Install scripts reviewed (`install.ps1`, `install.sh`)
+        - label: README quickstart validated
+        - label: LICENSE and manifest license values are aligned
+
+  - type: checkboxes
+    id: release_assets
+    attributes:
+      label: Release assets
+      options:
+        - label: Windows/Linux/macOS artifacts generated
+        - label: SHA256 checksum files generated and verified
+        - label: `latest.json` generated
+        - label: Package manager manifests generated
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      placeholder: Add known caveats or rollout notes.

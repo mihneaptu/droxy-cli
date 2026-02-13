@@ -1,0 +1,93 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-artifacts:
+    name: Build ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: windows
+            arch: x64
+          - runner: ubuntu-latest
+            platform: linux
+            arch: x64
+          - runner: ubuntu-latest
+            platform: linux
+            arch: arm64
+          - runner: macos-latest
+            platform: darwin
+            arch: x64
+          - runner: macos-latest
+            platform: darwin
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build release artifact
+        run: node scripts/build_release_artifact.js --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --out-dir dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: droxy-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/droxy-cli-${{ matrix.platform }}-${{ matrix.arch }}.*
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-artifacts
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Build latest manifest
+        run: node scripts/build_latest_manifest.js --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --out dist/latest.json
+
+      - name: Generate Homebrew + winget manifests
+        run: node scripts/generate_package_manifests.js --repo "${{ github.repository }}" --tag "${{ github.ref_name }}" --out-dir dist/package-managers
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/droxy-cli-*.zip
+            dist/droxy-cli-*.zip.sha256
+            dist/droxy-cli-*.tar.gz
+            dist/droxy-cli-*.tar.gz.sha256
+            dist/latest.json
+            dist/package-managers/homebrew/*.rb
+            dist/package-managers/winget/**/*.yaml
+            install.ps1
+            install.sh
+          generate_release_notes: true

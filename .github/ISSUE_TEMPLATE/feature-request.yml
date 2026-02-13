@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose an improvement to droxy-cli
+title: "[feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea.
+        You do not need to write a perfect spec. Plain language is great.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What friction or missing capability are you seeing?
+      placeholder: Describe the current gap.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe your preferred behavior and CLI UX.
+      placeholder: Explain expected command/output or workflow.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: Optional alternatives you evaluated.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Expected impact
+      options:
+        - High (blocks normal use)
+        - Medium (improves common workflow)
+        - Low (nice-to-have)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: personality_alignment
+    attributes:
+      label: Does this improve calm/trustworthy UX?
+      options:
+        - Yes
+        - Not sure
+        - No
+    validations:
+      required: true
