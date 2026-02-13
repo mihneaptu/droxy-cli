@@ -105,10 +105,12 @@ function buildProviderModelGroups(entries, providerStatuses) {
     const modelId = extractModelIdFromEntry(entry);
     if (!modelId) continue;
 
-    let providerId = resolveProviderForModelEntry(entry);
+    let providerId = resolveProviderFromHint(modelId);
     if (!providerMap.has(providerId)) {
       const explicitProviderId = resolveProviderFromEntryMetadata(entry);
       if (providerMap.has(explicitProviderId)) {
+        providerId = explicitProviderId;
+      } else if (!providerId) {
         providerId = explicitProviderId;
       }
     }
