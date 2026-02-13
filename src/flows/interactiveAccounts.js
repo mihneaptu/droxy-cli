@@ -3,13 +3,27 @@
 const ACCOUNT_MENU_ACTIONS = Object.freeze({
   back: { id: "back", label: "Back to Menu" },
   connectAccount: { id: "connect_provider", label: "Connect Account" },
-  listAccounts: { id: "list_accounts", label: "List Accounts" },
+  listAccounts: { id: "list_accounts", label: "List Connected Accounts" },
 });
+
+function getConnectionCount(provider) {
+  const count = Number(provider && provider.connectionCount);
+  if (Number.isFinite(count) && count > 0) return Math.floor(count);
+  return provider && provider.connected ? 1 : 0;
+}
+
+function getConnectedAccountTotal(providers) {
+  return (Array.isArray(providers) ? providers : []).reduce((total, provider) => (
+    provider && provider.connected ? total + getConnectionCount(provider) : total
+  ), 0);
+}
 
 function formatProviderStatusLine(provider) {
   const label = provider && provider.label ? provider.label : "Unknown Provider";
   const id = provider && provider.id ? provider.id : "unknown";
-  const status = provider && provider.connected ? "Connected" : "Not connected";
+  const connectionCount = getConnectionCount(provider);
+  const countSuffix = connectionCount > 1 ? ` (${connectionCount})` : "";
+  const status = provider && provider.connected ? `Connected${countSuffix}` : "Not connected";
   return `- ${label} (${id}): ${status}`;
 }
 
@@ -32,8 +46,13 @@ function buildAccountsTitle(output, providers) {
 }
 
 async function promptAccountsAction({ menu, output, providers }) {
+  const connectedAccountTotal = getConnectedAccountTotal(providers);
+  const listAccountsLabel =
+    connectedAccountTotal > 1
+      ? `${ACCOUNT_MENU_ACTIONS.listAccounts.label} (${connectedAccountTotal})`
+      : ACCOUNT_MENU_ACTIONS.listAccounts.label;
   const actions = [
-    ACCOUNT_MENU_ACTIONS.listAccounts,
+    { ...ACCOUNT_MENU_ACTIONS.listAccounts, label: listAccountsLabel },
     ACCOUNT_MENU_ACTIONS.connectAccount,
     ACCOUNT_MENU_ACTIONS.back,
   ];
@@ -47,18 +66,34 @@ async function promptAccountsAction({ menu, output, providers }) {
   return action ? action.id : ACCOUNT_MENU_ACTIONS.back.id;
 }
 
-function printAccountsSummary(output, providers) {
+function buildConnectedAccountsTitle(output, providers) {
   const rows = Array.isArray(providers) ? providers : [];
-  const connected = rows.filter((provider) => provider && provider.connected).length;
-  output.log("");
-  output.printInfo(`Accounts connected: ${connected}/${rows.length}`);
-  for (const line of rows.map(formatProviderStatusLine)) {
-    output.log(`  ${line}`);
+  const connectedRows = rows.filter((provider) => provider && provider.connected);
+  const connectedAccountTotal = getConnectedAccountTotal(rows);
+  const lines = [
+    output.accent("Connected Accounts"),
+    output.dim(`Connected accounts: ${connectedAccountTotal}`),
+    output.dim(`Connected providers: ${connectedRows.length}/${rows.length}`),
+    "",
+  ];
+  if (!connectedRows.length) {
+    lines.push(output.dim("No connected accounts found."));
+    return lines.join("\n");
   }
+  lines.push(...connectedRows.map(formatProviderStatusLine));
+  return lines.join("\n");
+}
+
+async function promptConnectedAccountsList({ menu, output, providers }) {
+  await menu.selectSingle({
+    title: buildConnectedAccountsTitle(output, providers),
+    items: [ACCOUNT_MENU_ACTIONS.back.label],
+    hint: "Press Enter or q to return.",
+  });
 }
 
 module.exports = {
   ACCOUNT_MENU_ACTIONS,
+  promptConnectedAccountsList,
   promptAccountsAction,
-  printAccountsSummary,
 };

@@ -695,7 +695,6 @@ test("connect provider menu omits status badges and keeps refresh message", asyn
 });
 
 test("accounts menu can list status and connect account", async () => {
-  const outputCalls = [];
   const loginCalls = [];
   const selectSingleCalls = [];
   let homePromptCount = 0;
@@ -720,8 +719,8 @@ test("accounts menu can list status and connect account", async () => {
         { id: "codex", label: "OpenAI / Codex" },
       ],
       getProvidersWithConnectionStatus: () => [
-        { id: "claude", label: "Claude (Anthropic)", connected: true },
-        { id: "codex", label: "OpenAI / Codex", connected: false },
+        { id: "claude", label: "Claude (Anthropic)", connected: true, connectionCount: 2 },
+        { id: "codex", label: "OpenAI / Codex", connected: false, connectionCount: 0 },
       ],
       loginFlow: async (opts) => {
         loginCalls.push(opts);
@@ -738,9 +737,12 @@ test("accounts menu can list status and connect account", async () => {
           const label = homePromptCount === 1 ? "Accounts" : "Exit";
           return { cancelled: false, index: payload.items.indexOf(label), value: label };
         }
+        if (/Connected Accounts/i.test(payload.title || "")) {
+          return { cancelled: false, index: 0, value: payload.items[0] };
+        }
         if (/Accounts/i.test(payload.title || "")) {
           accountsPromptCount += 1;
-          const label = accountsPromptCount === 1 ? "List Accounts" :
+          const label = accountsPromptCount === 1 ? payload.items[0] :
             accountsPromptCount === 2 ? "Connect Account" : "Back to Menu";
           return { cancelled: false, index: payload.items.indexOf(label), value: label };
         }
@@ -750,7 +752,7 @@ test("accounts menu can list status and connect account", async () => {
         return { cancelled: true, index: -1, value: "" };
       },
     },
-    output: createOutputStub(outputCalls),
+    output: createOutputStub([]),
     proxy: {
       getProxyStatus: async () => ({ blocked: false, running: true }),
       startProxy: async () => ({ running: true }),
@@ -766,18 +768,21 @@ test("accounts menu can list status and connect account", async () => {
 
   const homePrompt = selectSingleCalls.find((payload) => /Droxy Interactive/i.test(payload.title || ""));
   const accountsPrompt = selectSingleCalls.find((payload) => /Accounts/i.test(payload.title || ""));
+  const connectedListPrompt = selectSingleCalls.find((payload) =>
+    /Connected Accounts/i.test(payload.title || "")
+  );
   assert.equal(Boolean(homePrompt), true);
   assert.equal(homePrompt.items.includes("Accounts"), true);
   assert.equal(Boolean(accountsPrompt), true);
-  assert.equal(accountsPrompt.items.includes("List Accounts"), true);
-  assert.equal(accountsPrompt.items.includes("Connect Account"), true);
-  assert.deepEqual(loginCalls, [{ providerId: "claude", quiet: false }]);
   assert.equal(
-    outputCalls.some(
-      (entry) => entry[0] === "printInfo" && /Accounts connected: 1\/2/.test(entry[1])
-    ),
+    accountsPrompt.items.some((item) => /List Connected Accounts \(2\)/.test(item)),
     true
   );
+  assert.equal(accountsPrompt.items.includes("Connect Account"), true);
+  assert.equal(Boolean(connectedListPrompt), true);
+  assert.match(connectedListPrompt.title, /Connected accounts:\s+2/i);
+  assert.match(connectedListPrompt.title, /Connected \(2\)/i);
+  assert.deepEqual(loginCalls, [{ providerId: "claude", quiet: false }]);
 });
 
 test("interactive mode reports non-interactive sessions", async () => {

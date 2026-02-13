@@ -1,6 +1,6 @@
 "use strict";
 
-const { promptAccountsAction, printAccountsSummary } = require("./interactiveAccounts");
+const { promptAccountsAction, promptConnectedAccountsList } = require("./interactiveAccounts");
 const {
   getProvidersWithStatus,
   promptProviderSelection,
@@ -55,7 +55,7 @@ function createInteractiveProviderActions({
       }
       const action = await promptAccountsAction({ menu, output, providers });
       if (action === "list_accounts") {
-        printAccountsSummary(output, providers);
+        await promptConnectedAccountsList({ menu, output, providers });
         continue;
       }
       if (action === "connect_provider") {
