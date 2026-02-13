@@ -53,21 +53,16 @@ function extractModelIdFromEntry(entry) {
   return normalizeText(entry.id || entry.model || entry.name || entry.slug);
 }
 
-function resolveProviderFromEntryMetadata(entry) {
+function resolveProviderFromEntryOwnerMetadata(entry) {
   if (!entry || typeof entry !== "object") return "";
   let raw =
-    entry.provider ||
-    entry.provider_id ||
-    entry.providerId ||
-    entry.vendor ||
-    entry.source ||
     entry.owner ||
     entry.owned_by ||
     entry.organization ||
     entry.org;
 
   if (!raw && entry.meta && typeof entry.meta === "object") {
-    raw = entry.meta.provider || entry.meta.owner;
+    raw = entry.meta.owner;
   }
 
   if (raw && typeof raw === "object") {
@@ -75,6 +70,32 @@ function resolveProviderFromEntryMetadata(entry) {
   }
 
   return resolveProviderFromHint(raw);
+}
+
+function resolveProviderFromEntryProviderMetadata(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  let raw =
+    entry.provider ||
+    entry.provider_id ||
+    entry.providerId ||
+    entry.vendor ||
+    entry.source;
+
+  if (!raw && entry.meta && typeof entry.meta === "object") {
+    raw = entry.meta.provider;
+  }
+
+  if (raw && typeof raw === "object") {
+    raw = raw.id || raw.name || raw.provider;
+  }
+
+  return resolveProviderFromHint(raw);
+}
+
+function resolveProviderFromEntryMetadata(entry) {
+  const owner = resolveProviderFromEntryOwnerMetadata(entry);
+  if (owner) return owner;
+  return resolveProviderFromEntryProviderMetadata(entry);
 }
 
 function resolveModelFamilyFromModelId(modelId) {
@@ -108,11 +129,14 @@ function resolveModelFamilyFromModelId(modelId) {
 function resolveProviderForModelEntry(entry) {
   if (!entry || typeof entry !== "object") return "";
 
-  const fromMetadata = resolveProviderFromEntryMetadata(entry);
-  if (fromMetadata) return fromMetadata;
+  const fromOwnerMetadata = resolveProviderFromEntryOwnerMetadata(entry);
+  if (fromOwnerMetadata) return fromOwnerMetadata;
 
   const modelId = extractModelIdFromEntry(entry);
-  return resolveProviderFromHint(modelId);
+  const fromModelId = resolveProviderFromHint(modelId);
+  if (fromModelId) return fromModelId;
+
+  return resolveProviderFromEntryProviderMetadata(entry);
 }
 
 function buildProviderModelGroups(entries, providerStatuses) {
@@ -133,24 +157,17 @@ function buildProviderModelGroups(entries, providerStatuses) {
     const modelId = extractModelIdFromEntry(entry);
     if (!modelId) continue;
 
-    let providerId = resolveProviderForModelEntry(entry);
-    if (!providerMap.has(providerId)) {
-      const explicitProviderId = resolveProviderFromEntryMetadata(entry);
-      if (explicitProviderId) {
-        if (providerMap.has(explicitProviderId)) {
-          providerId = explicitProviderId;
-        } else {
-          continue;
-        }
-      } else {
-        const fallbackProviderId = resolveProviderFromHint(modelId);
-        if (providerMap.has(fallbackProviderId)) {
-          providerId = fallbackProviderId;
-        }
+    const explicitProviderId = resolveProviderFromEntryMetadata(entry);
+    if (explicitProviderId) {
+      if (providerMap.has(explicitProviderId)) {
+        providerMap.get(explicitProviderId).models.push(modelId);
       }
+      continue;
     }
-    if (providerId && providerMap.has(providerId)) {
-      providerMap.get(providerId).models.push(modelId);
+
+    const providerFromHint = resolveProviderFromHint(modelId);
+    if (providerFromHint && providerMap.has(providerFromHint)) {
+      providerMap.get(providerFromHint).models.push(modelId);
     }
   }
 

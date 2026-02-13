@@ -241,6 +241,19 @@ test("splitModelsForFactoryEntries keeps antigravity ownership for gpt-oss while
   });
 });
 
+test("splitModelsForFactoryEntries prefers explicit owner metadata for duplicate ids", () => {
+  const split = sync.splitModelsForFactoryEntries([
+    { id: "gpt-oss-120b-medium" },
+    { id: "gpt-oss-120b-medium", owned_by: "antigravity" },
+  ]);
+
+  assert.deepEqual(split.openai, ["gpt-oss-120b-medium"]);
+  assert.deepEqual(split.anthropic, []);
+  assert.deepEqual(split.byProvider, {
+    antigravity: ["gpt-oss-120b-medium"],
+  });
+});
+
 test("filterDetectedEntriesBySelection keeps only explicitly selected models", () => {
   const result = sync.filterDetectedEntriesBySelection(
     [

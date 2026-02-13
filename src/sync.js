@@ -213,7 +213,7 @@ function createSyncApi(overrides = {}) {
     return classifyProviderForFactory(modelId);
   }
 
-  function resolveProviderOwnerForEntry(entry) {
+  function resolveProviderOwnerFromEntryMetadata(entry) {
     if (!entry) return "";
     let raw =
       entry.provider ||
@@ -234,9 +234,13 @@ function createSyncApi(overrides = {}) {
       raw = raw.id || raw.name || raw.provider;
     }
 
-    const normalized = normalizeProviderOwnerTag(raw);
+    return normalizeProviderOwnerTag(raw);
+  }
+
+  function resolveProviderOwnerForEntry(entry) {
+    const normalized = resolveProviderOwnerFromEntryMetadata(entry);
     if (normalized) return normalized;
-    return classifyProviderOwnerFromModelId(entry.id);
+    return classifyProviderOwnerFromModelId(entry && entry.id);
   }
 
   function splitModelsForFactoryEntries(entries) {
@@ -244,21 +248,40 @@ function createSyncApi(overrides = {}) {
     for (const entry of entries || []) {
       const id = entry && entry.id ? String(entry.id) : "";
       if (!id) continue;
-      const ownerProvider = resolveProviderOwnerForEntry(entry);
+      const metadataOwnerProvider = resolveProviderOwnerFromEntryMetadata(entry);
+      const ownerProvider = metadataOwnerProvider || classifyProviderOwnerFromModelId(id);
+      const ownerFromMetadata = Boolean(metadataOwnerProvider);
       const factoryProvider = mapOwnerToFactoryProvider(ownerProvider, id);
-      const next = { ownerProvider, factoryProvider };
+      const next = { ownerProvider, factoryProvider, ownerFromMetadata };
       if (!byId.has(id)) {
         byId.set(id, next);
         continue;
       }
       const existing = byId.get(id) || {};
-      const shouldReplaceOwner = !existing.ownerProvider && ownerProvider;
+      const hasExistingMetadataOwner = existing.ownerFromMetadata === true;
+      const shouldReplaceOwner =
+        (!existing.ownerProvider && ownerProvider) ||
+        (
+          ownerFromMetadata &&
+          (!hasExistingMetadataOwner || existing.ownerProvider !== ownerProvider)
+        );
+      const nextOwnerProvider = shouldReplaceOwner ? ownerProvider : existing.ownerProvider;
+      const nextOwnerFromMetadata = shouldReplaceOwner
+        ? ownerFromMetadata
+        : hasExistingMetadataOwner;
+      const nextFactoryProvider =
+        existing.factoryProvider === "anthropic"
+          ? "anthropic"
+          : shouldReplaceOwner
+            ? mapOwnerToFactoryProvider(nextOwnerProvider, id)
+            : existing.factoryProvider;
       const shouldReplaceFactory =
-        existing.factoryProvider !== "anthropic" && factoryProvider === "anthropic";
+        nextFactoryProvider !== "anthropic" && factoryProvider === "anthropic";
       if (shouldReplaceOwner || shouldReplaceFactory) {
         byId.set(id, {
-          ownerProvider: shouldReplaceOwner ? ownerProvider : existing.ownerProvider,
-          factoryProvider: shouldReplaceFactory ? factoryProvider : existing.factoryProvider,
+          ownerProvider: nextOwnerProvider,
+          ownerFromMetadata: nextOwnerFromMetadata,
+          factoryProvider: shouldReplaceFactory ? factoryProvider : nextFactoryProvider,
         });
       }
     }
