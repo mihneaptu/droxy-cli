@@ -34,14 +34,13 @@ function createOutputStub() {
 }
 
 test("interactive mode chooses models and syncs only selected entries", async () => {
-  const answers = ["2", "a", "c", "3", "7"];
   const syncCalls = [];
   let state = {
     apiKey: "k",
   };
+  const singleSelections = [{ index: 1 }, { index: 2 }, { index: 6 }];
 
   const interactive = createInteractiveApi({
-    ask: async () => answers.shift() || "7",
     config: {
       ensureConfig: () => {},
       readConfigValues: () => ({
@@ -63,6 +62,16 @@ test("interactive mode chooses models and syncs only selected entries", async ()
       PROVIDERS: [],
       loginFlow: async () => ({ success: true }),
       resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async ({ items }) => ({
+        cancelled: false,
+        selected: items.slice(),
+      }),
+      selectSingle: async () => {
+        const next = singleSelections.shift() || { index: 6 };
+        return { cancelled: false, value: "", ...next };
+      },
     },
     output: createOutputStub(),
     proxy: {

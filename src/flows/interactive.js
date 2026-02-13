@@ -4,81 +4,59 @@ const configModule = require("../config");
 const loginModule = require("../login");
 const proxyModule = require("../proxy");
 const syncModule = require("../sync");
+const menuModule = require("../ui/menu");
 const outputModule = require("../ui/output");
 const { Spinner } = require("../ui/spinner");
-const {
-  buildProviderLines,
-  MENU_ITEMS,
-  createDefaultAsk,
-  normalizeModelIds,
-  normalizeText,
-  runModelSelectionPrompt,
-} = require("./interactiveHelpers");
+const { HOME_ACTIONS, normalizeModelIds, normalizeText } = require("./interactiveHelpers");
 
 function createInteractiveApi(overrides = {}) {
   const config = overrides.config || configModule;
   const login = overrides.login || loginModule;
   const proxy = overrides.proxy || proxyModule;
   const sync = overrides.sync || syncModule;
+  const menu = overrides.menu || menuModule;
   const output = overrides.output || outputModule;
-  const ask =
-    overrides.ask ||
-    createDefaultAsk(overrides.readline, overrides.input, overrides.outputStream);
   const now = overrides.now || (() => new Date().toISOString());
   const isInteractiveSession =
     overrides.isInteractiveSession ||
     (() => Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY));
   const createSpinner = overrides.createSpinner || ((text) => new Spinner(text));
 
-  function printHome() {
+  function homeTitle() {
     const state = config.readState() || {};
     const selectedProvider = normalizeText(state.selectedProvider) || "not selected";
     const selectedModels = normalizeModelIds(state.selectedModels);
-
-    output.log("");
-    output.printDivider();
-    output.log(output.accent("Droxy Interactive"));
-    output.log(output.dim("Manual setup flow with explicit provider/model selection."));
-    output.log(output.dim(`Provider: ${selectedProvider}`));
-    output.log(output.dim(`Selected models: ${selectedModels.length}`));
-    output.printDivider();
-    output.log("");
-
-    for (const item of MENU_ITEMS) {
-      output.log(item);
-    }
-    output.log("");
+    return [
+      output.accent("Droxy Interactive"),
+      output.dim("Manual setup flow with explicit provider/model selection."),
+      output.dim(`Provider: ${selectedProvider}`),
+      output.dim(`Selected models: ${selectedModels.length}`),
+    ].join("\n");
   }
 
-  async function promptHomeChoice() {
-    return normalizeText(await ask("Select action: ")).toLowerCase();
-  }
-
-  function providerLines() {
-    return buildProviderLines(login.PROVIDERS);
+  async function promptHomeAction() {
+    const selection = await menu.selectSingle({
+      title: homeTitle(),
+      items: HOME_ACTIONS.map((item) => item.label),
+      hint: "Use ↑/↓ and Enter. Press q to exit.",
+    });
+    if (!selection || selection.cancelled) return "exit";
+    const action = HOME_ACTIONS[selection.index];
+    return action ? action.id : "exit";
   }
 
   async function promptProviderSelection() {
     const providers = Array.isArray(login.PROVIDERS) ? login.PROVIDERS : [];
     if (!providers.length) return null;
 
-    output.log("");
-    output.log("Choose provider:");
-    for (const line of providerLines()) {
-      output.log(`  ${line}`);
-    }
-    output.log("");
+    const selection = await menu.selectSingle({
+      title: "Choose provider",
+      items: providers.map((provider) => `${provider.label} (${provider.id})`),
+      hint: "Use ↑/↓ and Enter. Press q to cancel.",
+    });
 
-    const answer = normalizeText(await ask("Provider number or id (q to cancel): "));
-    if (!answer) return null;
-    const lower = answer.toLowerCase();
-    if (lower === "q" || lower === "quit" || lower === "cancel") return null;
-
-    const number = Number.parseInt(answer, 10);
-    if (Number.isFinite(number) && number >= 1 && number <= providers.length) {
-      return providers[number - 1];
-    }
-    return typeof login.resolveProvider === "function" ? login.resolveProvider(answer) : null;
+    if (!selection || selection.cancelled) return null;
+    return providers[selection.index] || null;
   }
 
   async function connectProviderFlow() {
@@ -133,9 +111,16 @@ function createInteractiveApi(overrides = {}) {
       { protocolResolution }
     );
 
-    return normalizeModelIds(
-      entries.map((entry) => (entry && entry.id ? String(entry.id) : ""))
-    );
+    return normalizeModelIds(entries.map((entry) => (entry && entry.id ? String(entry.id) : "")));
+  }
+
+  async function promptModelSelection(models, initialSelected) {
+    return menu.selectMultiple({
+      title: "Choose models",
+      items: models,
+      initialSelected: normalizeModelIds(initialSelected),
+      hint: "↑/↓ move  space toggle  a all  n none  enter confirm  q cancel",
+    });
   }
 
   async function chooseModelsFlow() {
@@ -165,15 +150,16 @@ function createInteractiveApi(overrides = {}) {
     }
 
     const state = config.readState() || {};
-    const selectedModels = await runModelSelectionPrompt({
-      ask,
-      initialSelection: state.selectedModels || [],
-      models,
-      output,
-    });
-    if (!selectedModels) {
+    const selection = await promptModelSelection(models, state.selectedModels || []);
+    if (!selection || selection.cancelled) {
       output.printInfo("Model selection cancelled.");
       return { success: false, reason: "cancelled" };
+    }
+
+    const selectedModels = normalizeModelIds(selection.selected);
+    if (!selectedModels.length) {
+      output.printWarning("No models selected. Selection was not changed.");
+      return { success: false, reason: "empty_selection" };
     }
 
     config.updateState({
@@ -278,25 +264,22 @@ function createInteractiveApi(overrides = {}) {
 
     let exitRequested = false;
     while (!exitRequested) {
-      printHome();
-      const choice = await promptHomeChoice();
+      const action = await promptHomeAction();
 
-      if (choice === "1") {
+      if (action === "connect_provider") {
         await connectProviderFlow();
-      } else if (choice === "2") {
+      } else if (action === "choose_models") {
         await chooseModelsFlow();
-      } else if (choice === "3") {
+      } else if (action === "sync_droid") {
         await syncSelectedModelsFlow();
-      } else if (choice === "4") {
+      } else if (action === "status") {
         await statusFlow();
-      } else if (choice === "5") {
+      } else if (action === "start_proxy") {
         await startProxyFlow();
-      } else if (choice === "6") {
+      } else if (action === "stop_proxy") {
         await stopProxyFlow();
-      } else if (choice === "7" || choice === "q" || choice === "quit" || choice === "exit") {
-        exitRequested = true;
       } else {
-        output.printWarning("Choose a menu number between 1 and 7.");
+        exitRequested = true;
       }
     }
 
@@ -306,7 +289,6 @@ function createInteractiveApi(overrides = {}) {
   }
 
   return {
-    MENU_ITEMS,
     chooseModelsFlow,
     connectProviderFlow,
     runInteractiveHome,
