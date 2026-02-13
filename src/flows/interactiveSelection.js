@@ -6,6 +6,7 @@ const { COLORS, colorize } = require("../ui/colors");
 const {
   normalizeModelIds,
   normalizeText,
+  resolveModelFamilyFromModelId,
   resolveProviderForModelEntry,
 } = require("./interactiveHelpers");
 const THINKING_MODE_VALUES = helpers.THINKING_MODE_VALUES;
@@ -282,9 +283,14 @@ async function fetchModelEntriesForSelection({ config, proxy, sync }) {
 }
 
 async function promptModelSelection(menu, models, initialSelected, providerLabel) {
+  const items = normalizeModelIds(models).map((modelId) => {
+    const family = resolveModelFamilyFromModelId(modelId);
+    const label = family ? `${modelId}  ${colorize("·", COLORS.dim)} family: ${family}` : modelId;
+    return { value: modelId, label };
+  });
   return menu.selectMultiple({
     title: `Choose models • ${providerLabel}`,
-    items: models,
+    items,
     initialSelected: normalizeModelIds(initialSelected),
     hint: "↑/↓ move  space toggle  a all  n none (this provider)  enter confirm  q cancel",
   });
