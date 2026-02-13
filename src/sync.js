@@ -991,6 +991,21 @@ function createSyncApi(overrides = {}) {
     return fromConfig;
   }
 
+  function warnManagementExclusionFetchFailure(message, err, options = {}) {
+    if (options && options.quiet) return;
+    if (!output || typeof output.printWarning !== "function") return;
+
+    const details =
+      helpers && typeof helpers.formatErrorSummary === "function"
+        ? helpers.formatErrorSummary(err)
+        : String((err && (err.message || err)) || "").trim();
+    if (!details) {
+      output.printWarning(message);
+      return;
+    }
+    output.printWarning(`${message} (${details})`);
+  }
+
   async function requestManagementJson({
     configValues,
     protocol,
@@ -1115,6 +1130,7 @@ function createSyncApi(overrides = {}) {
     const protocol =
       (options && typeof options.protocol === "string" && options.protocol) ||
       configuredProtocol(configValues);
+    let oauthExcludedError = null;
 
     try {
       const oauthExcluded = await fetchOAuthExcludedModels({
@@ -1123,8 +1139,13 @@ function createSyncApi(overrides = {}) {
         managementKey,
       });
       if (oauthExcluded.length) return oauthExcluded;
-    } catch {
-      // Ignore oauth exclusion endpoint errors and continue to auth-files fallback.
+    } catch (err) {
+      oauthExcludedError = err;
+      warnManagementExclusionFetchFailure(
+        `Could not read ${MANAGEMENT_OAUTH_EXCLUDED_MODELS_PATH}; falling back to ${MANAGEMENT_AUTH_FILES_PATH}.`,
+        err,
+        options
+      );
     }
 
     try {
@@ -1133,7 +1154,14 @@ function createSyncApi(overrides = {}) {
         protocol,
         managementKey,
       });
-    } catch {
+    } catch (err) {
+      warnManagementExclusionFetchFailure(
+        oauthExcludedError
+          ? `Could not read ${MANAGEMENT_AUTH_FILES_PATH} after fallback; continuing without management exclusions.`
+          : `Could not read ${MANAGEMENT_AUTH_FILES_PATH}; continuing without management exclusions.`,
+        err,
+        options
+      );
       return [];
     }
   }
@@ -1419,6 +1447,7 @@ function createSyncApi(overrides = {}) {
             protocol,
             state: options.state,
             managementKey: options.managementKey,
+            quiet: options.quiet === true,
           });
           return filterExcludedModelEntries(eligibleEntries, excludedModelIds);
         } catch (err) {
@@ -1541,7 +1570,7 @@ function createSyncApi(overrides = {}) {
       try {
         detectedEntries = await fetchAvailableModelEntries(
           { ...configValues, apiKey },
-          { protocolResolution, state }
+          { protocolResolution, state, quiet }
         );
       } catch (err) {
         const result = { status: "skipped", reason: "detect_failed", error: String(err.message || err) };
