@@ -13,6 +13,7 @@ function createDeps() {
       version: "0.1.0",
       output: {
         log: (msg) => calls.push(["log", String(msg)]),
+        printGuidedError: (payload) => calls.push(["printGuidedError", payload]),
       },
       proxy: {
         startProxy: async (opts) => calls.push(["startProxy", opts]),
@@ -87,8 +88,13 @@ test("unknown command prints suggestion and help", async () => {
     process.exitCode = 0;
     await runCli(["stauts"], target.deps);
     assert.equal(process.exitCode, 1);
-    assert.equal(target.calls[0][0], "log");
-    assert.match(target.calls[0][1], /Did you mean \"droxy status\"\?/);
+    const guided = target.calls.find((entry) => entry[0] === "printGuidedError");
+    assert.equal(Boolean(guided), true);
+    assert.match(String(guided[1].what || ""), /Unknown command "stauts"/);
+    assert.equal(
+      Array.isArray(guided[1].next) && guided[1].next.some((step) => /droxy status/.test(step)),
+      true
+    );
     assert.equal(target.calls.some((entry) => /Usage:/.test(entry[1]) || /Droxy CLI/.test(entry[1])), true);
   } finally {
     process.exitCode = previousExitCode;

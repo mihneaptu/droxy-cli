@@ -29,3 +29,8 @@ Providers:
 - `kimi`
 - `iflow`
 - `antigravity`
+
+## Solo Dev Workflow
+
+- Weekly shipping workflow: `docs/WORKFLOW.md`
+- CLI style + voice system: `docs/CLI_STYLE_GUIDE.md`

@@ -672,7 +672,14 @@ function createSyncApi(overrides = {}) {
   async function syncDroidSettings({ quiet = false } = {}) {
     if (!config.configExists()) {
       if (!quiet) {
-        output.printWarning(`Config missing at ${config.getConfigPath()}`);
+        output.printGuidedError({
+          what: `Config missing at ${config.getConfigPath()}.`,
+          why: "Droid sync requires local Droxy config values (host, port, auth).",
+          next: [
+            "Run: droxy login",
+            "Then run: droxy droid sync",
+          ],
+        });
       }
       return { success: false, reason: "config_missing" };
     }
@@ -694,7 +701,15 @@ function createSyncApi(overrides = {}) {
         fallbackError: helpers.formatErrorSummary(protocolResolution.fallbackError),
       };
       if (!quiet) {
-        output.printWarning(describeSyncResult(result));
+        output.printGuidedError({
+          what: "Droid sync skipped.",
+          why: describeSyncResult(result),
+          next: [
+            "Run: droxy start",
+            "Run: droxy status --verbose",
+            "Then run: droxy droid sync",
+          ],
+        });
       }
       return { success: false, reason: "proxy_unreachable", result };
     }
@@ -708,7 +723,15 @@ function createSyncApi(overrides = {}) {
     } catch (err) {
       const result = { status: "skipped", reason: "detect_failed", error: String(err.message || err) };
       if (!quiet) {
-        output.printWarning("Model detection failed during Droid sync.");
+        output.printGuidedError({
+          what: "Model detection failed during Droid sync.",
+          why: String(err && err.message ? err.message : "Unknown detection error."),
+          next: [
+            "Verify your provider login: droxy login <provider>",
+            "Check proxy health: droxy status --verbose",
+            "Retry: droxy droid sync",
+          ],
+        });
       }
       return { success: false, reason: "detect_failed", result };
     }

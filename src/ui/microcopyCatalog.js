@@ -14,6 +14,13 @@ const PREMIUM_MICROCOPY = {
   labels: {
     nextSteps: "Next steps:",
   },
+  voice: {
+    principles: {
+      clarity: "Be clear and specific.",
+      calm: "Stay calm and direct.",
+      actionable: "Always provide a next command when possible.",
+    },
+  },
   trust: {
     control: {
       login: "Connect only trusted accounts.",
