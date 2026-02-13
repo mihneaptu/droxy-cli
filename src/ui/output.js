@@ -88,7 +88,7 @@ function printSmartSuggestion(state) {
 
   if (!suggestion) return;
   log("");
-  log(colorize(`  Suggestion: ${suggestion}`, COLORS.dim));
+  log(colorize(`  Next: ${suggestion}`, COLORS.dim));
 }
 
 function printDivider(width = 56, char = "─") {

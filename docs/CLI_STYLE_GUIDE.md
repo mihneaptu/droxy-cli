@@ -1,81 +1,68 @@
 # CLI Style Guide
 
-## Design Direction
+## One Style Only
 
-- Voice: Anthropic-inspired tone.
-- UX: Droid-first practical command workflow.
-- Scope: terminal-only, no web UI requirements.
+Droxy uses one style system. There are no user-selectable voice profiles.
 
-This is inspiration, not brand imitation. Do not copy Anthropic trademark visuals or proprietary product wording.
+- Tone: Anthropic-inspired writing voice.
+- Accent color: Droid orange (`#FF5C00`).
+- UX shape: calm guidance with concrete next commands.
 
-## Voice Rules
+This is inspiration, not trademark imitation. Do not copy proprietary Anthropic copy.
 
-- Calm, direct, and useful.
-- No hype, no sarcasm, no fluff.
-- Prefer short sentences.
-- For errors, always include next actions.
+## Why This Voice Works
 
-### Error Shape (Required)
+The style should feel likable because it is:
+
+1. Clear: says exactly what happened.
+2. Calm: avoids panic, blame, and hype.
+3. Useful: always gives immediate next steps.
+4. Honest: states uncertainty when we do not know.
+
+## Error Shape (Required)
 
 Every actionable error should include:
 
 1. What happened
 2. Why it happened
-3. Next commands to run
+3. Next command(s)
 
 Use `printGuidedError` from `src/ui/output.js`.
 
 ## Output Rules
 
-- All user-visible output should flow through `src/ui/output.js`.
-- Avoid direct output in command modules.
-- Keep plain text readable at 80 columns.
+- Route user-facing output through `src/ui/output.js`.
+- Keep messages short and direct.
 - Use icon + text + color (not color only).
+- Keep lines readable around 80 columns.
 
 ## Color Rules
 
-- Use tokenized semantic colors:
+- Droid orange is the primary accent.
+- Use semantic colors only for state:
   - info
   - success
   - warning
   - error
-- Respect no-color environments.
-- Keep one primary accent color and avoid rainbow overuse.
+- Respect no-color mode (`NO_COLOR=1` or `DROXY_NO_COLOR=1`).
 
 ## Motion Rules
 
 - Motion should communicate progress, not decoration.
-- Keep spinner usage for operations longer than ~300ms.
-- Avoid stacked animations in one command path.
+- Prefer one spinner per command path.
+- Avoid stacking multiple animations at once.
 
 ## Token Sources
 
-- `src/ui/designTokens.js`
-  - spacing scale (`xs/sm/md/lg`)
-  - motion timing (`fast/normal/slow`)
-  - semantic colors
-- `src/ui/microcopyCatalog.js`
-  - reusable text strings
-  - profile overrides
-
-## Command UX Rules
-
-- Command-first: `start`, `stop`, `status`, `login`, `droid sync`.
-- Interactive fallback only when needed (for example provider selection).
-- Keep machine mode stable:
-  - `status --json` must remain predictable.
+- `src/ui/designTokens.js` for spacing/motion/colors.
+- `src/ui/microcopyCatalog.js` for reusable copy and voice principles.
+- `src/ui/colors.js` for terminal ANSI color palette.
 
 ## Quality Gates
 
 Before merge:
 
 1. `npm test` passes.
-2. `droxy --help` remains accurate.
-3. At least one manual error path tested for new behavior.
-4. No direct `console.log` or unmanaged stdout usage outside `src/ui`.
-
-## References
-
-- Factory CLI docs: https://docs.factory.ai/cli
-- Factory CLI reference: https://docs.factory.ai/reference/cli-reference
-- Anthropic style reference: https://support.anthropic.com/en/articles/10181068-configuring-and-using-styles
+2. `node droxy.js --help` remains accurate.
+3. At least one manual error path is verified.
+4. No direct output from non-UI modules.

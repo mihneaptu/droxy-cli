@@ -27,7 +27,8 @@ This workflow is optimized for a solo developer with limited experience.
 ### Wednesday (UI + Voice)
 
 - Route all user-facing output through `src/ui/output.js`.
-- Apply tokenized copy and color usage.
+- Apply the single Anthropic-inspired voice system (no alternate styles).
+- Keep Droid orange as the primary accent for emphasis.
 - Keep motion minimal and meaningful.
 
 ### Thursday (Hardening)

@@ -1,5 +1,5 @@
 "use strict";
-const PREMIUM_MICROCOPY = {
+const CLAUDE_MICROCOPY = {
   banner: {
     subtitle: "v{{version}} | Your local AI bridge",
     onboardingSubtitle: "v{{version}} | Let's get you set up",
@@ -16,9 +16,10 @@ const PREMIUM_MICROCOPY = {
   },
   voice: {
     principles: {
-      clarity: "Be clear and specific.",
-      calm: "Stay calm and direct.",
-      actionable: "Always provide a next command when possible.",
+      clarity: "Be explicit about what happened and what changes.",
+      calm: "Keep tone steady, respectful, and low-drama.",
+      actionable: "Always give the next command to recover.",
+      honesty: "Say when something is uncertain instead of pretending certainty.",
     },
   },
   trust: {
@@ -325,29 +326,14 @@ const PREMIUM_MICROCOPY = {
     },
   },
 };
-const CLASSIC_MICROCOPY = {
-  banner: {
-    subtitle: "v{{version}} • FACTORY EDITION",
-    compactSubtitle: "v{{version}}",
-  },
-  labels: {
-    nextSteps: "Suggestions:",
-  },
-  onboarding: {
-    cancelled: "Onboarding cancelled.",
-    detectModels: "We'll detect models from your connected accounts.",
-  },
-  login: {
-    noProvidersConnected: "No providers connected.",
-  },
-  doctor: {
-    nextStepsTitle: "Suggestions:",
-  },
-  header: {
-    mainSubtitle: "v{{version}} • Factory Edition",
-  },
-};
+
+// Backward-compatible aliases so older imports keep working while all
+// call sites use the same single voice profile.
+const PREMIUM_MICROCOPY = CLAUDE_MICROCOPY;
+const CLASSIC_MICROCOPY = CLAUDE_MICROCOPY;
+
 module.exports = {
+  CLAUDE_MICROCOPY,
   CLASSIC_MICROCOPY,
   PREMIUM_MICROCOPY,
 };

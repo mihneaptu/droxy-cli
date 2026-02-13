@@ -34,3 +34,4 @@ Providers:
 
 - Weekly shipping workflow: `docs/WORKFLOW.md`
 - CLI style + voice system: `docs/CLI_STYLE_GUIDE.md`
+- Style baseline: one Anthropic-inspired voice with Droid orange primary accent

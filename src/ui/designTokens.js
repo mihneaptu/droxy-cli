@@ -1,24 +1,25 @@
 "use strict";
 
-const SHARED_COLORS = {
-  primary: "#FF5C00",
-  secondary: "#9D4EDD",
-  background: "#0F0F1A",
-  text: "#E0E0E0",
-  dim: "#5A5A6E",
-  success: "#4ADE80",
-  warning: "#FFB86C",
-  error: "#F87171",
+const CLAUDE_COLORS = {
+  accent: "#FF5C00",
+  neutral: "#334155",
+  background: "#F8FAFC",
+  text: "#0F172A",
+  dim: "#64748B",
+  success: "#166534",
+  warning: "#A16207",
+  error: "#B91C1C",
+  info: "#1D4ED8",
 };
 
-const SHARED_MOTION = {
-  fastMs: 90,
-  normalMs: 180,
-  slowMs: 320,
-  spinnerIntervalMs: 80,
+const CLAUDE_MOTION = {
+  fastMs: 80,
+  normalMs: 160,
+  slowMs: 280,
+  spinnerIntervalMs: 90,
 };
 
-const SHARED_SPACING = {
+const CLAUDE_SPACING = {
   xs: 0,
   sm: 1,
   md: 2,
@@ -26,62 +27,40 @@ const SHARED_SPACING = {
   sectionGap: 1,
 };
 
-const DESIGN_TOKENS = {
-  premium: {
-    colors: SHARED_COLORS,
-    motion: SHARED_MOTION,
-    spacing: SHARED_SPACING,
-    box: {
-      style: "rounded",
-      pad: 1,
-    },
-    header: {
-      subtitleSeparator: " | ",
-    },
-    menu: {
-      footerSeparator: "  ·  ",
-      selectedProgressFormat: "{{selected}}/{{total}} {{label}}",
-      statusPrefix: "› ",
-      statusDurationMs: 1100,
-      transitionDelayMs: 70,
-    },
-    voice: {
-      style: "anthropic-inspired",
-      priorities: [
-        "clarity",
-        "calm",
-        "actionable-next-step",
-      ],
-    },
+const CLAUDE_DESIGN_TOKENS = {
+  colors: CLAUDE_COLORS,
+  motion: CLAUDE_MOTION,
+  spacing: CLAUDE_SPACING,
+  box: {
+    style: "rounded",
+    pad: 1,
   },
-  classic: {
-    colors: SHARED_COLORS,
-    motion: SHARED_MOTION,
-    spacing: SHARED_SPACING,
-    box: {
-      style: "rounded",
-      pad: 1,
-    },
-    header: {
-      subtitleSeparator: " • ",
-    },
-    menu: {
-      footerSeparator: "  |  ",
-      selectedProgressFormat: "{{selected}}/{{total}} {{label}}",
-      statusPrefix: "-> ",
-      statusDurationMs: 900,
-      transitionDelayMs: 40,
-    },
-    voice: {
-      style: "droid-first",
-      priorities: [
-        "brevity",
-        "predictability",
-      ],
-    },
+  header: {
+    subtitleSeparator: " | ",
+  },
+  menu: {
+    footerSeparator: "  ·  ",
+    selectedProgressFormat: "{{selected}}/{{total}} {{label}}",
+    statusPrefix: "› ",
+    statusDurationMs: 1000,
+    transitionDelayMs: 60,
+  },
+  voice: {
+    style: "anthropic-inspired",
+    priorities: [
+      "clear-with-context",
+      "calm-under-failure",
+      "specific-next-command",
+      "honest-uncertainty",
+    ],
   },
 };
 
+const DESIGN_TOKENS = {
+  claude: CLAUDE_DESIGN_TOKENS,
+};
+
 module.exports = {
+  CLAUDE_DESIGN_TOKENS,
   DESIGN_TOKENS,
 };
