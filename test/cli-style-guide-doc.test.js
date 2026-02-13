@@ -6,9 +6,7 @@ const path = require("path");
 const test = require("node:test");
 
 function readStyleGuide() {
-  const preferredPath = path.resolve(__dirname, "..", "docs", "DROXY_STYLE_GUIDE.md");
-  const legacyPath = path.resolve(__dirname, "..", "docs", "CLI_STYLE_GUIDE.md");
-  const styleGuidePath = fs.existsSync(preferredPath) ? preferredPath : legacyPath;
+  const styleGuidePath = path.resolve(__dirname, "..", "docs", "DROXY_STYLE_GUIDE.md");
   return fs.readFileSync(styleGuidePath, "utf8");
 }
 

@@ -165,6 +165,8 @@ Don't:
 ## Token and Source Files
 
 - `src/ui/designTokens.js`: voice priorities and UI tokens.
+- `src/ui/voiceCatalog.js`: canonical voice profile definitions.
+- `src/ui/uiProfile.js`: resolved UI profile used by style-aware output.
 - `src/ui/microcopyCatalog.js`: reusable tone and principle copy.
 - `src/ui/colors.js`: ANSI palette + no-color behavior.
 - `src/ui/animations.js`: spinner/motion behavior.
