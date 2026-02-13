@@ -162,7 +162,8 @@ function createInteractiveApi(overrides = {}) {
       selectedModels = mergeProviderModelSelection(
         existingSelectedModels,
         providerGroup.models,
-        selectedForProvider
+        selectedForProvider,
+        providerGroup.id
       );
       break;
     }

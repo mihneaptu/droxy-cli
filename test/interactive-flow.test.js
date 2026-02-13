@@ -272,6 +272,62 @@ test("interactive home auto-syncs when selected models drift from Droid state", 
   assert.deepEqual(syncCalls[0].selectedModels, ["gpt-5"]);
 });
 
+test("interactive home skips auto-sync when model selection has not been persisted yet", async () => {
+  const syncCalls = [];
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => ({
+        thinkingModels: [],
+      }),
+      updateState: () => ({}),
+      configExists: () => true,
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "codex", label: "OpenAI / Codex" }],
+      getProvidersWithConnectionStatus: () => [
+        { id: "codex", label: "OpenAI / Codex", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async () => ({ cancelled: true, selected: [] }),
+      selectSingle: async () => ({ cancelled: true, index: -1, value: "" }),
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [{ id: "gpt-5", provider: "openai" }],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async (opts) => {
+        syncCalls.push(opts);
+        return { success: true, result: { status: "synced", modelsAdded: 1 } };
+      },
+    },
+    readDroidSyncedModelIdsByProvider: () => ({ codex: ["gpt-5"] }),
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(syncCalls.length, 0);
+});
+
 test("provider model picker preselects Droid-synced models when no prior selection exists", async () => {
   const selectSingleCalls = [];
   const selectMultipleCalls = [];

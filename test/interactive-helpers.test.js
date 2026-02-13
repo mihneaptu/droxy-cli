@@ -59,3 +59,13 @@ test("mergeProviderModelSelection replaces only selected provider segment", () =
   );
   assert.deepEqual(merged, ["claude-sonnet", "gpt-5"]);
 });
+
+test("mergeProviderModelSelection drops stale provider ids when clearing a provider", () => {
+  const merged = mergeProviderModelSelection(
+    ["claude-opus-legacy", "gpt-5"],
+    ["claude-opus-4-5"],
+    [],
+    "claude"
+  );
+  assert.deepEqual(merged, ["gpt-5"]);
+});

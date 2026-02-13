@@ -116,10 +116,36 @@ function buildProviderModelGroups(entries, providerStatuses) {
   return connected.concat(disconnected);
 }
 
-function mergeProviderModelSelection(existingSelection, providerModels, selectedWithinProvider) {
+function resolveProviderForSelection(providerId, providerModels, selectedWithinProvider) {
+  const explicit = normalizeProviderHint(providerId);
+  if (explicit) return explicit;
+
+  const candidates = normalizeModelIds(providerModels).concat(normalizeModelIds(selectedWithinProvider));
+  for (const modelId of candidates) {
+    const resolved = resolveProviderFromHint(modelId);
+    if (resolved) return resolved;
+  }
+  return "";
+}
+
+function mergeProviderModelSelection(
+  existingSelection,
+  providerModels,
+  selectedWithinProvider,
+  providerId = ""
+) {
   const existing = normalizeModelIds(existingSelection);
   const providerSet = new Set(normalizeModelIds(providerModels));
-  const remainder = existing.filter((modelId) => !providerSet.has(modelId));
+  const targetProviderId = resolveProviderForSelection(
+    providerId,
+    providerModels,
+    selectedWithinProvider
+  );
+  const remainder = existing.filter((modelId) => {
+    if (providerSet.has(modelId)) return false;
+    if (!targetProviderId) return true;
+    return resolveProviderFromHint(modelId) !== targetProviderId;
+  });
   return normalizeModelIds(remainder.concat(selectedWithinProvider));
 }
 

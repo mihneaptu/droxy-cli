@@ -32,7 +32,11 @@ async function autoSyncSelectedModelsIfDrifted({
   }
 
   const state = config.readState() || {};
-  const selectedModels = normalizeModelIds(state.selectedModels || []);
+  if (!Array.isArray(state.selectedModels)) {
+    return { success: false, reason: "no_persisted_selection" };
+  }
+
+  const selectedModels = normalizeModelIds(state.selectedModels);
   const syncedByProvider = readDroidSyncedModelIdsByProvider();
   const syncedModels = flattenSyncedModelIdsByProvider(syncedByProvider, normalizeModelIds);
 
