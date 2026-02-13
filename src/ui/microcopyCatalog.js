@@ -249,6 +249,9 @@ const CLAUDE_MICROCOPY = {
     },
   },
   errors: {
+    guidedDefaultWhat: "That step did not complete yet.",
+    guidedFallbackHint: "Droxy could not complete this step yet.",
+    guidedFallbackTry: "Run: droxy help",
     connectionRefused: "Connection refused.",
     connectionRefusedHint: "Is the proxy running?",
     connectionRefusedTry: "Try: droxy start",

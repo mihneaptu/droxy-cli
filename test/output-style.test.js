@@ -68,3 +68,13 @@ test("printError adds calm fallback guidance when hint and command are missing",
   assert.match(text, /Droxy could not complete this step yet\./);
   assert.match(text, /Run: droxy help/);
 });
+
+test("printSuccess/printWarning/printInfo skip empty messages", () => {
+  const text = captureStdout(() => {
+    output.printSuccess("   ");
+    output.printWarning("");
+    output.printInfo(null);
+  });
+
+  assert.equal(text, "");
+});
