@@ -221,9 +221,9 @@ function printHelp(output = outputModule) {
     "  - Use `droxy status --json` for automation",
     "  - Disable color with NO_COLOR=1 or DROXY_NO_COLOR=1",
     "",
-    "Workflow docs:",
-    "  docs/WORKFLOW.md",
-    "  docs/CLI_STYLE_GUIDE.md",
+    "Docs:",
+    "  docs/GIT_WORKFLOW.md",
+    "  docs/DROXY_STYLE_GUIDE.md",
   ];
 
   for (const line of lines) {

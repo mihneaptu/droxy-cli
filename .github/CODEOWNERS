@@ -1,0 +1,7 @@
+# Default owner for repository changes
+* @mihneaptu
+
+# High-risk runtime hotspots
+/droxy.js @mihneaptu
+/src/proxy.js @mihneaptu
+/src/sync.js @mihneaptu

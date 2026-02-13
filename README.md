@@ -50,8 +50,25 @@ Providers:
 - `iflow`
 - `antigravity`
 
-## Solo Dev Workflow
+## Solo Dev Notes
 
-- Weekly shipping workflow: `docs/WORKFLOW.md`
-- CLI style + voice system: `docs/CLI_STYLE_GUIDE.md`
+- CLI style + voice system: `docs/DROXY_STYLE_GUIDE.md`
+- Git workflow (local + GitHub): `docs/GIT_WORKFLOW.md`
 - Style baseline: one Anthropic-inspired voice with Droid orange primary accent
+
+## Contributing Workflow
+
+Use a small-PR workflow:
+
+1. Start from updated `main`.
+2. Create one focused branch (`feature/*`, `fix/*`, `chore/*`).
+3. Open a PR with validation notes and merge using squash.
+
+See `docs/GIT_WORKFLOW.md` for branch naming, commit conventions, cleanup commands, and recommended GitHub repository settings.
+
+For contributor onboarding and project policies:
+
+- `CONTRIBUTING.md`
+- `CODE_OF_CONDUCT.md`
+- `SECURITY.md`
+- `SUPPORT.md`
