@@ -55,6 +55,29 @@ function wrapSelectable(items, index) {
   return index;
 }
 
+function normalizeMultiOption(item) {
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const value = String(item.value || "").trim();
+    if (!value) return null;
+    const label = String(item.label || value);
+    return { value, label };
+  }
+
+  const value = String(item || "").trim();
+  if (!value) return null;
+  return { value, label: value };
+}
+
+function normalizeMultiOptions(items) {
+  const options = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const normalized = normalizeMultiOption(item);
+    if (!normalized) continue;
+    options.push(normalized);
+  }
+  return options;
+}
+
 function drawSingleLines({ hint, index, items, title }) {
   const lines = [];
   if (title) lines.push(title);
@@ -74,8 +97,8 @@ function drawMultiLines({ hint, index, items, selected, title }) {
   lines.push("");
   for (let i = 0; i < items.length; i += 1) {
     const pointer = i === index ? colorize(">", COLORS.orange) : " ";
-    const mark = selected.has(items[i]) ? "[x]" : "[ ]";
-    lines.push(`${pointer} ${mark} ${items[i]}`);
+    const mark = selected.has(items[i].value) ? "[x]" : "[ ]";
+    lines.push(`${pointer} ${mark} ${items[i].label}`);
   }
   lines.push("");
   lines.push(colorize(hint || "↑/↓ move  space toggle  a all  n none  enter confirm  q cancel", COLORS.dim));
@@ -178,14 +201,15 @@ function createMenuApi(overrides = {}) {
     items = [],
     title = "",
   } = {}) {
-    const values = Array.isArray(items) ? items.slice() : [];
-    if (!values.length) return { cancelled: true, selected: [] };
+    const options = normalizeMultiOptions(items);
+    if (!options.length) return { cancelled: true, selected: [] };
     if (!isInteractiveTty(input, output)) {
       return { cancelled: true, selected: [] };
     }
 
+    const values = options.map((option) => option.value);
     let resolved = false;
-    let selectedIndex = clampIndex(initialIndex, values.length);
+    let selectedIndex = clampIndex(initialIndex, options.length);
     const selected = new Set(
       (Array.isArray(initialSelected) ? initialSelected : []).filter((item) =>
         values.includes(item)
@@ -215,7 +239,7 @@ function createMenuApi(overrides = {}) {
           drawMultiLines({
             hint,
             index: selectedIndex,
-            items: values,
+            items: options,
             selected,
             title,
           })
@@ -262,7 +286,9 @@ function createMenuApi(overrides = {}) {
         }
         if (key.toLowerCase() === "a") {
           selected.clear();
-          for (const value of values) selected.add(value);
+          for (const value of values) {
+            selected.add(value);
+          }
           redraw();
           return;
         }

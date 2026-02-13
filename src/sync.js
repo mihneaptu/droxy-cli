@@ -163,17 +163,57 @@ function createSyncApi(overrides = {}) {
     return "openai";
   }
 
-  function normalizeProviderTag(raw) {
-    const value = String(raw || "").toLowerCase();
-    if (!value) return "";
-    if (value.includes("anthropic") || value.includes("claude")) return "anthropic";
-    if (value.includes("openai") || value.includes("codex") || value.includes("gpt")) {
-      return "openai";
+  function classifyProviderOwnerFromModelId(modelId) {
+    const lower = String(modelId || "").toLowerCase();
+    if (!lower) return "";
+    if (lower.includes("antigravity") || lower.includes("tab_")) return "antigravity";
+    if (lower.includes("claude")) return "claude";
+    if (
+      lower === "gpt" ||
+      lower.startsWith("gpt-") ||
+      lower.startsWith("o1") ||
+      lower.startsWith("o3") ||
+      lower.startsWith("o4")
+    ) {
+      return "codex";
+    }
+    if (lower.includes("google") || lower.includes("gemini") || lower.includes("aistudio")) {
+      return "gemini";
+    }
+    if (lower.includes("qwen")) return "qwen";
+    if (lower.includes("moonshot") || lower.includes("kimi")) return "kimi";
+    if (
+      lower.includes("iflow") ||
+      lower.includes("deepseek") ||
+      lower.includes("glm-") ||
+      lower.includes("minimax")
+    ) {
+      return "iflow";
     }
     return "";
   }
 
-  function resolveProviderForEntry(entry) {
+  function normalizeProviderOwnerTag(raw) {
+    const value = String(raw || "").toLowerCase();
+    if (!value) return "";
+    if (value.includes("antigravity")) return "antigravity";
+    if (value.includes("anthropic") || value.includes("claude")) return "claude";
+    if (value.includes("openai") || value.includes("codex")) return "codex";
+    if (value.includes("google") || value.includes("gemini") || value.includes("aistudio")) return "gemini";
+    if (value.includes("qwen")) return "qwen";
+    if (value.includes("moonshot") || value.includes("kimi")) return "kimi";
+    if (value.includes("iflow")) return "iflow";
+    return "";
+  }
+
+  function mapOwnerToFactoryProvider(ownerProvider, modelId) {
+    const owner = String(ownerProvider || "").trim().toLowerCase();
+    if (owner === "claude") return "anthropic";
+    if (owner) return "openai";
+    return classifyProviderForFactory(modelId);
+  }
+
+  function resolveProviderOwnerForEntry(entry) {
     if (!entry) return "";
     let raw =
       entry.provider ||
@@ -194,9 +234,9 @@ function createSyncApi(overrides = {}) {
       raw = raw.id || raw.name || raw.provider;
     }
 
-    const normalized = normalizeProviderTag(raw);
+    const normalized = normalizeProviderOwnerTag(raw);
     if (normalized) return normalized;
-    return classifyProviderForFactory(entry.id);
+    return classifyProviderOwnerFromModelId(entry.id);
   }
 
   function splitModelsForFactoryEntries(entries) {
@@ -204,24 +244,54 @@ function createSyncApi(overrides = {}) {
     for (const entry of entries || []) {
       const id = entry && entry.id ? String(entry.id) : "";
       if (!id) continue;
-      const provider = resolveProviderForEntry(entry);
+      const ownerProvider = resolveProviderOwnerForEntry(entry);
+      const factoryProvider = mapOwnerToFactoryProvider(ownerProvider, id);
+      const next = { ownerProvider, factoryProvider };
       if (!byId.has(id)) {
-        byId.set(id, provider);
+        byId.set(id, next);
         continue;
       }
-      if (provider === "anthropic") {
-        byId.set(id, provider);
+      const existing = byId.get(id) || {};
+      const shouldReplaceOwner = !existing.ownerProvider && ownerProvider;
+      const shouldReplaceFactory =
+        existing.factoryProvider !== "anthropic" && factoryProvider === "anthropic";
+      if (shouldReplaceOwner || shouldReplaceFactory) {
+        byId.set(id, {
+          ownerProvider: shouldReplaceOwner ? ownerProvider : existing.ownerProvider,
+          factoryProvider: shouldReplaceFactory ? factoryProvider : existing.factoryProvider,
+        });
       }
     }
 
     const openai = [];
     const anthropic = [];
-    for (const [id, provider] of byId.entries()) {
-      if (provider === "anthropic") anthropic.push(id);
+    const byProvider = {};
+    for (const [id, splitInfo] of byId.entries()) {
+      const ownerProvider = splitInfo && splitInfo.ownerProvider ? String(splitInfo.ownerProvider) : "";
+      const factoryProvider =
+        splitInfo && splitInfo.factoryProvider ? String(splitInfo.factoryProvider) : "openai";
+
+      if (factoryProvider === "anthropic") anthropic.push(id);
       else openai.push(id);
+
+      if (ownerProvider) {
+        if (!Array.isArray(byProvider[ownerProvider])) {
+          byProvider[ownerProvider] = [];
+        }
+        byProvider[ownerProvider].push(id);
+      }
     }
 
-    return { openai, anthropic };
+    return {
+      openai,
+      anthropic,
+      byProvider: Object.fromEntries(
+        Object.entries(byProvider).map(([providerId, ids]) => [
+          providerId,
+          normalizeSelectedModelIds(ids),
+        ])
+      ),
+    };
   }
 
   function normalizeSelectedModelIds(selectedModels) {
@@ -1488,6 +1558,7 @@ function createSyncApi(overrides = {}) {
           autoDetect: true,
           openAiModels: [],
           anthropicModels: [],
+          modelsByProvider: {},
           modelReasoning: {},
           lastSyncAt: new Date().toISOString(),
         },
@@ -1578,6 +1649,7 @@ function createSyncApi(overrides = {}) {
         autoDetect: true,
         openAiModels: split.openai,
         anthropicModels: split.anthropic,
+        modelsByProvider: split.byProvider,
         modelReasoning: {},
         lastSyncAt: new Date().toISOString(),
       },

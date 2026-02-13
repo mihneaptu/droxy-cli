@@ -77,14 +77,42 @@ function resolveProviderFromEntryMetadata(entry) {
   return resolveProviderFromHint(raw);
 }
 
+function resolveModelFamilyFromModelId(modelId) {
+  const normalized = normalizeText(modelId).toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("gemini")) return "gemini";
+  if (
+    normalized === "gpt" ||
+    normalized.startsWith("gpt-") ||
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3") ||
+    normalized.startsWith("o4")
+  ) {
+    return "gpt";
+  }
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("qwen")) return "qwen";
+  if (normalized.includes("kimi") || normalized.includes("moonshot")) return "kimi";
+  if (
+    normalized.includes("iflow") ||
+    normalized.includes("deepseek") ||
+    normalized.includes("glm-") ||
+    normalized.includes("minimax")
+  ) {
+    return "iflow";
+  }
+  if (normalized.includes("tab_")) return "tab";
+  return "";
+}
+
 function resolveProviderForModelEntry(entry) {
   if (!entry || typeof entry !== "object") return "";
 
-  const modelId = extractModelIdFromEntry(entry);
-  const fromModelId = resolveProviderFromHint(modelId);
-  if (fromModelId) return fromModelId;
+  const fromMetadata = resolveProviderFromEntryMetadata(entry);
+  if (fromMetadata) return fromMetadata;
 
-  return resolveProviderFromEntryMetadata(entry);
+  const modelId = extractModelIdFromEntry(entry);
+  return resolveProviderFromHint(modelId);
 }
 
 function buildProviderModelGroups(entries, providerStatuses) {
@@ -108,8 +136,17 @@ function buildProviderModelGroups(entries, providerStatuses) {
     let providerId = resolveProviderForModelEntry(entry);
     if (!providerMap.has(providerId)) {
       const explicitProviderId = resolveProviderFromEntryMetadata(entry);
-      if (providerMap.has(explicitProviderId)) {
-        providerId = explicitProviderId;
+      if (explicitProviderId) {
+        if (providerMap.has(explicitProviderId)) {
+          providerId = explicitProviderId;
+        } else {
+          continue;
+        }
+      } else {
+        const fallbackProviderId = resolveProviderFromHint(modelId);
+        if (providerMap.has(fallbackProviderId)) {
+          providerId = fallbackProviderId;
+        }
       }
     }
     if (providerId && providerMap.has(providerId)) {
@@ -149,10 +186,12 @@ function mergeProviderModelSelection(
   existingSelection,
   providerModels,
   selectedWithinProvider,
-  providerId = ""
+  providerId = "",
+  persistedProviderModels = []
 ) {
   const existing = normalizeModelIds(existingSelection);
   const providerSet = new Set(normalizeModelIds(providerModels));
+  const persistedProviderSet = new Set(normalizeModelIds(persistedProviderModels));
   const targetProviderId = resolveProviderForSelection(
     providerId,
     providerModels,
@@ -160,6 +199,7 @@ function mergeProviderModelSelection(
   );
   const remainder = existing.filter((modelId) => {
     if (providerSet.has(modelId)) return false;
+    if (persistedProviderSet.has(modelId)) return false;
     if (!targetProviderId) return true;
     return resolveProviderFromHint(modelId) !== targetProviderId;
   });
@@ -200,6 +240,8 @@ module.exports = {
   HOME_ACTIONS,
   mergeProviderModelSelection,
   normalizeModelIds,
+  resolveModelFamilyFromModelId,
+  resolveProviderFromEntryMetadata,
   resolveProviderForModelEntry,
   resolveProviderFromHint,
   normalizeText,
