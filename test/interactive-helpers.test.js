@@ -29,7 +29,7 @@ test("buildProviderModelGroups groups known providers and drops unknown models",
   assert.equal(groups.some((group) => group.models.includes("mystery-model")), false);
 });
 
-test("buildProviderModelGroups prefers model-id family over raw provider tag", () => {
+test("buildProviderModelGroups prefers explicit provider metadata over model-id family", () => {
   const groups = buildProviderModelGroups(
     [
       { id: "claude-opus-4-5-thinking", provider: "antigravity" },
@@ -45,10 +45,41 @@ test("buildProviderModelGroups prefers model-id family over raw provider tag", (
   );
 
   const byId = new Map(groups.map((group) => [group.id, group.models]));
+  assert.deepEqual(byId.get("antigravity"), [
+    "claude-opus-4-5-thinking",
+    "gemini-2.5-flash",
+    "gpt-5",
+  ]);
+  assert.equal(Array.isArray(byId.get("claude")) ? byId.get("claude").length : 0, 0);
+  assert.equal(Array.isArray(byId.get("gemini")) ? byId.get("gemini").length : 0, 0);
+  assert.equal(Array.isArray(byId.get("codex")) ? byId.get("codex").length : 0, 0);
+});
+
+test("buildProviderModelGroups falls back to model-id family when metadata is missing", () => {
+  const groups = buildProviderModelGroups(
+    [
+      { id: "gpt-5.1-codex" },
+      { model: "claude-opus-4-5-thinking" },
+    ],
+    [
+      { id: "codex", label: "OpenAI / Codex", connected: true },
+      { id: "claude", label: "Claude (Anthropic)", connected: true },
+    ]
+  );
+
+  const byId = new Map(groups.map((group) => [group.id, group.models]));
   assert.deepEqual(byId.get("claude"), ["claude-opus-4-5-thinking"]);
-  assert.deepEqual(byId.get("gemini"), ["gemini-2.5-flash"]);
-  assert.deepEqual(byId.get("codex"), ["gpt-5"]);
-  assert.equal(Array.isArray(byId.get("antigravity")) ? byId.get("antigravity").length : 0, 0);
+  assert.deepEqual(byId.get("codex"), ["gpt-5.1-codex"]);
+});
+
+test("buildProviderModelGroups keeps gpt-oss antigravity models in antigravity group", () => {
+  const groups = buildProviderModelGroups(
+    [{ id: "gpt-oss-120b-medium", owned_by: "antigravity" }],
+    [{ id: "antigravity", label: "Antigravity", connected: true }]
+  );
+
+  assert.deepEqual(groups.map((group) => group.id), ["antigravity"]);
+  assert.deepEqual(groups[0].models, ["gpt-oss-120b-medium"]);
 });
 
 test("buildProviderModelGroups falls back to explicit provider when family provider is not connected", () => {
@@ -81,6 +112,17 @@ test("mergeProviderModelSelection drops stale provider ids when clearing a provi
     ["claude-opus-4-5"],
     [],
     "claude"
+  );
+  assert.deepEqual(merged, ["gpt-5"]);
+});
+
+test("mergeProviderModelSelection drops persisted provider models even when hints mismatch provider id", () => {
+  const merged = mergeProviderModelSelection(
+    ["gemini-3-flash", "gpt-oss-120b-medium", "gpt-5"],
+    ["gemini-3-pro-high"],
+    [],
+    "antigravity",
+    ["gemini-3-flash", "gpt-oss-120b-medium"]
   );
   assert.deepEqual(merged, ["gpt-5"]);
 });

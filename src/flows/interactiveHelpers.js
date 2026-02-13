@@ -53,38 +53,89 @@ function extractModelIdFromEntry(entry) {
   return normalizeText(entry.id || entry.model || entry.name || entry.slug);
 }
 
-function resolveProviderFromEntryMetadata(entry) {
+function extractProviderValue(value) {
+  if (!value || typeof value !== "object") return value;
+  return value.id || value.name || value.provider;
+}
+
+function resolveProviderFromEntryOwnerMetadata(entry) {
   if (!entry || typeof entry !== "object") return "";
   let raw =
-    entry.provider ||
-    entry.provider_id ||
-    entry.providerId ||
-    entry.vendor ||
-    entry.source ||
     entry.owner ||
     entry.owned_by ||
     entry.organization ||
     entry.org;
 
   if (!raw && entry.meta && typeof entry.meta === "object") {
-    raw = entry.meta.provider || entry.meta.owner;
+    raw = entry.meta.owner;
   }
 
-  if (raw && typeof raw === "object") {
-    raw = raw.id || raw.name || raw.provider;
-  }
-
+  raw = extractProviderValue(raw);
   return resolveProviderFromHint(raw);
+}
+
+function resolveProviderFromEntryProviderMetadata(entry) {
+  if (!entry || typeof entry !== "object") return "";
+  let raw =
+    entry.provider ||
+    entry.provider_id ||
+    entry.providerId ||
+    entry.vendor ||
+    entry.source;
+
+  if (!raw && entry.meta && typeof entry.meta === "object") {
+    raw = entry.meta.provider;
+  }
+
+  raw = extractProviderValue(raw);
+  return resolveProviderFromHint(raw);
+}
+
+function resolveProviderFromEntryMetadata(entry) {
+  const owner = resolveProviderFromEntryOwnerMetadata(entry);
+  if (owner) return owner;
+  return resolveProviderFromEntryProviderMetadata(entry);
+}
+
+function resolveModelFamilyFromModelId(modelId) {
+  const normalized = normalizeText(modelId).toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("gemini")) return "gemini";
+  if (
+    normalized === "gpt" ||
+    normalized.startsWith("gpt-") ||
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3") ||
+    normalized.startsWith("o4")
+  ) {
+    return "gpt";
+  }
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("qwen")) return "qwen";
+  if (normalized.includes("kimi") || normalized.includes("moonshot")) return "kimi";
+  if (
+    normalized.includes("iflow") ||
+    normalized.includes("deepseek") ||
+    normalized.includes("glm-") ||
+    normalized.includes("minimax")
+  ) {
+    return "iflow";
+  }
+  if (normalized.includes("tab_")) return "tab";
+  return "";
 }
 
 function resolveProviderForModelEntry(entry) {
   if (!entry || typeof entry !== "object") return "";
 
+  const fromOwnerMetadata = resolveProviderFromEntryOwnerMetadata(entry);
+  if (fromOwnerMetadata) return fromOwnerMetadata;
+
   const modelId = extractModelIdFromEntry(entry);
   const fromModelId = resolveProviderFromHint(modelId);
   if (fromModelId) return fromModelId;
 
-  return resolveProviderFromEntryMetadata(entry);
+  return resolveProviderFromEntryProviderMetadata(entry);
 }
 
 function buildProviderModelGroups(entries, providerStatuses) {
@@ -105,15 +156,17 @@ function buildProviderModelGroups(entries, providerStatuses) {
     const modelId = extractModelIdFromEntry(entry);
     if (!modelId) continue;
 
-    let providerId = resolveProviderForModelEntry(entry);
-    if (!providerMap.has(providerId)) {
-      const explicitProviderId = resolveProviderFromEntryMetadata(entry);
+    const explicitProviderId = resolveProviderFromEntryMetadata(entry);
+    if (explicitProviderId) {
       if (providerMap.has(explicitProviderId)) {
-        providerId = explicitProviderId;
+        providerMap.get(explicitProviderId).models.push(modelId);
       }
+      continue;
     }
-    if (providerId && providerMap.has(providerId)) {
-      providerMap.get(providerId).models.push(modelId);
+
+    const providerFromHint = resolveProviderFromHint(modelId);
+    if (providerFromHint && providerMap.has(providerFromHint)) {
+      providerMap.get(providerFromHint).models.push(modelId);
     }
   }
 
@@ -149,10 +202,12 @@ function mergeProviderModelSelection(
   existingSelection,
   providerModels,
   selectedWithinProvider,
-  providerId = ""
+  providerId = "",
+  persistedProviderModels = []
 ) {
   const existing = normalizeModelIds(existingSelection);
   const providerSet = new Set(normalizeModelIds(providerModels));
+  const persistedProviderSet = new Set(normalizeModelIds(persistedProviderModels));
   const targetProviderId = resolveProviderForSelection(
     providerId,
     providerModels,
@@ -160,6 +215,7 @@ function mergeProviderModelSelection(
   );
   const remainder = existing.filter((modelId) => {
     if (providerSet.has(modelId)) return false;
+    if (persistedProviderSet.has(modelId)) return false;
     if (!targetProviderId) return true;
     return resolveProviderFromHint(modelId) !== targetProviderId;
   });
@@ -200,6 +256,8 @@ module.exports = {
   HOME_ACTIONS,
   mergeProviderModelSelection,
   normalizeModelIds,
+  resolveModelFamilyFromModelId,
+  resolveProviderFromEntryMetadata,
   resolveProviderForModelEntry,
   resolveProviderFromHint,
   normalizeText,

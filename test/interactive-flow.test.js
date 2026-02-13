@@ -34,6 +34,12 @@ function createOutputStub(calls = []) {
   };
 }
 
+function getSelectableValues(items = []) {
+  return (Array.isArray(items) ? items : []).map((item) =>
+    item && typeof item === "object" && !Array.isArray(item) ? item.value : item
+  );
+}
+
 test("interactive mode chooses provider-first models and syncs merged selection", async () => {
   const outputCalls = [];
   const syncCalls = [];
@@ -78,7 +84,7 @@ test("interactive mode chooses provider-first models and syncs merged selection"
     menu: {
       selectMultiple: async (payload) => {
         selectMultipleCalls.push(payload);
-        return { cancelled: false, selected: payload.items.slice() };
+        return { cancelled: false, selected: getSelectableValues(payload.items) };
       },
       selectSingle: async (payload) => {
         selectSingleCalls.push(payload);
@@ -120,7 +126,14 @@ test("interactive mode chooses provider-first models and syncs merged selection"
 
   assert.equal(selectMultipleCalls.length, 2);
   assert.match(selectMultipleCalls[0].title, /Choose models/i);
-  assert.deepEqual(selectMultipleCalls[0].items, ["gpt-5"]);
+  assert.deepEqual(getSelectableValues(selectMultipleCalls[0].items), ["gpt-5"]);
+  assert.equal(
+    Array.isArray(selectMultipleCalls[0].items) &&
+      selectMultipleCalls[0].items.every(
+        (item) => item && typeof item === "object" && /family:\s*gpt/i.test(String(item.label || ""))
+      ),
+    true
+  );
   assert.match(selectMultipleCalls[1].title, /Choose thinking models/i);
   assert.equal(
     selectSingleCalls.some((call) => /Thinking mode\s+•\s+gpt-5/i.test(call.title || "")),
@@ -403,6 +416,78 @@ test("provider model picker preselects Droid-synced models when no prior selecti
   assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5"]);
 });
 
+test("provider model picker prefers persisted provider defaults over Droid-derived defaults", async () => {
+  const selectMultipleCalls = [];
+  let state = {
+    factory: {
+      modelsByProvider: {
+        codex: ["gpt-5.1"],
+      },
+    },
+  };
+  const singleSelections = [{ index: 2 }, { index: 0 }];
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => state,
+      updateState: (partial) => {
+        state = { ...state, ...partial };
+        return state;
+      },
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "codex", label: "OpenAI / Codex" }],
+      getProvidersWithConnectionStatus: () => [
+        { id: "codex", label: "OpenAI / Codex", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async (payload) => {
+        selectMultipleCalls.push(payload);
+        return { cancelled: false, selected: payload.initialSelected.slice() };
+      },
+      selectSingle: async (payload) => {
+        const next = singleSelections.shift() || { index: payload.items.length - 1 };
+        return { cancelled: false, value: "", ...next };
+      },
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [
+        { id: "gpt-5", provider: "openai" },
+        { id: "gpt-5.1", provider: "openai" },
+      ],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async () => ({ success: true, result: { modelsAdded: 1 } }),
+    },
+    readDroidSyncedModelIdsByProvider: () => ({ codex: ["gpt-5"] }),
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(selectMultipleCalls.length, 2);
+  assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5.1"]);
+});
+
 test("provider model picker prefers Droid-synced defaults over stale local selection", async () => {
   const selectSingleCalls = [];
   const selectMultipleCalls = [];
@@ -482,6 +567,71 @@ test("provider model picker prefers Droid-synced defaults over stale local selec
   );
 });
 
+test("model picker keeps antigravity-owned gpt and gemini models under antigravity", async () => {
+  const selectMultipleCalls = [];
+  const singleSelections = [{ index: 2 }, { index: 0 }];
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => ({}),
+      updateState: () => ({}),
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "antigravity", label: "Antigravity" }],
+      getProvidersWithConnectionStatus: () => [
+        { id: "antigravity", label: "Antigravity", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async (payload) => {
+        selectMultipleCalls.push(payload);
+        return { cancelled: false, selected: getSelectableValues(payload.items) };
+      },
+      selectSingle: async (payload) => {
+        const next = singleSelections.shift() || { index: payload.items.length - 1 };
+        return { cancelled: false, value: "", ...next };
+      },
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [
+        { id: "gpt-oss-120b-medium", owned_by: "antigravity" },
+        { id: "gemini-3-flash", owned_by: "antigravity" },
+      ],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async () => ({ success: true, result: { modelsAdded: 2 } }),
+    },
+    readDroidSyncedModelIdsByProvider: () => ({ antigravity: [] }),
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(selectMultipleCalls.length, 2);
+  assert.deepEqual(
+    getSelectableValues(selectMultipleCalls[0].items),
+    ["gemini-3-flash", "gpt-oss-120b-medium"]
+  );
+});
+
 test("model provider picker hides disconnected providers", async () => {
   const selectSingleCalls = [];
   const selectMultipleCalls = [];
@@ -517,7 +667,7 @@ test("model provider picker hides disconnected providers", async () => {
     menu: {
       selectMultiple: async (payload) => {
         selectMultipleCalls.push(payload);
-        return { cancelled: false, selected: payload.items.slice() };
+        return { cancelled: false, selected: getSelectableValues(payload.items) };
       },
       selectSingle: async (payload) => {
         selectSingleCalls.push(payload);
@@ -548,7 +698,7 @@ test("model provider picker hides disconnected providers", async () => {
   assert.equal(selectSingleCalls.length >= 2, true);
   assert.equal(selectSingleCalls[1].items.some((item) => /OpenAI \/ Codex/.test(item)), false);
   assert.equal(selectMultipleCalls.length, 2);
-  assert.deepEqual(selectMultipleCalls[0].items, ["claude-opus"]);
+  assert.deepEqual(getSelectableValues(selectMultipleCalls[0].items), ["claude-opus"]);
 });
 
 test("model picker cancel returns to provider picker", async () => {
@@ -586,7 +736,7 @@ test("model picker cancel returns to provider picker", async () => {
         selectMultipleCalls.push(payload);
         multiCount += 1;
         if (multiCount === 1) return { cancelled: true, selected: [] };
-        return { cancelled: false, selected: payload.items.slice() };
+        return { cancelled: false, selected: getSelectableValues(payload.items) };
       },
       selectSingle: async (payload) => {
         selectSingleCalls.push(payload);
