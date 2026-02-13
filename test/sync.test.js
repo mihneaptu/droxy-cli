@@ -246,6 +246,56 @@ test("syncDroidSettings writes files from provided detected entries without netw
   }
 });
 
+test("syncDroidSettings prunes stale selected IDs when only partial matches are detected", async () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    let updatedState = null;
+    const failRequest = () => {
+      throw new Error("network should not be used");
+    };
+
+    const api = sync.createSyncApi({
+      config: {
+        DEFAULT_PORT: 8317,
+        configExists: () => true,
+        ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+        readConfigValues: () => ({
+          host: "127.0.0.1",
+          port: 8317,
+          tlsEnabled: false,
+          apiKey: "k",
+        }),
+        readState: () => ({ apiKey: "k" }),
+        updateState: (patch) => {
+          updatedState = patch;
+          return patch;
+        },
+      },
+      http: { request: failRequest },
+      https: { request: failRequest },
+      output: {
+        printGuidedError: () => {},
+        printSuccess: () => {},
+      },
+    });
+
+    const result = await api.syncDroidSettings({
+      quiet: true,
+      selectedModels: ["gpt-5", "missing-model"],
+      detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+      protocol: "http",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.result && result.result.status, "synced");
+    assert.deepEqual(result.result && result.result.selectedModels, ["gpt-5"]);
+    assert.equal(result.result && result.result.selectedModelsSkipped, 1);
+    assert.deepEqual(updatedState && updatedState.selectedModels, ["gpt-5"]);
+  } finally {
+    cleanup();
+  }
+});
+
 test("syncDroidSettings clears Droid models when selection is explicitly empty", async () => {
   const cleanup = withTempFactoryDir();
   try {

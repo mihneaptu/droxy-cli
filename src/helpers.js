@@ -22,6 +22,19 @@ function normalizedHost(host) {
   return trimmed;
 }
 
+function normalizeIdList(items) {
+  const seen = new Set();
+  const output = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    const value = String(item || "").trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    output.push(value);
+  }
+  output.sort((left, right) => left.localeCompare(right));
+  return output;
+}
+
 function formatErrorSummary(err) {
   if (!err) return "";
   const raw = String(err.message || err || "").trim();
@@ -168,6 +181,7 @@ module.exports = {
   isWindows,
   killPid,
   killPidByPort,
+  normalizeIdList,
   normalizeUrl,
   normalizedHost,
   runCommandOutput,

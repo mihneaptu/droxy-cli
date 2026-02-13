@@ -2,7 +2,9 @@
 "use strict";
 
 const pkg = require("./package.json");
+const configModule = require("./src/config");
 const interactiveModule = require("./src/flows/interactive");
+const helpersModule = require("./src/helpers");
 const loginModule = require("./src/login");
 const proxyModule = require("./src/proxy");
 const syncModule = require("./src/sync");
@@ -246,7 +248,9 @@ function isInteractiveSession(options = {}) {
 }
 
 async function runCli(argv = process.argv.slice(2), options = {}) {
+  const config = options.config || configModule;
   const interactive = options.interactive || interactiveModule;
+  const helpers = options.helpers || helpersModule;
   const proxy = options.proxy || proxyModule;
   const login = options.login || loginModule;
   const sync = options.sync || syncModule;
@@ -309,10 +313,23 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
     if (skipModels) {
       return loginResult;
     }
-    if (!quiet && output && typeof output.printInfo === "function") {
-      output.printInfo("Auto-syncing detected models to Droid...");
+    const state =
+      config && typeof config.readState === "function" ? config.readState() || {} : {};
+    const hasPersistedSelection = Array.isArray(state.selectedModels);
+    if (!hasPersistedSelection) {
+      if (!quiet && output && typeof output.printInfo === "function") {
+        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models.");
+      }
+      return loginResult;
     }
-    const syncResult = await sync.syncDroidSettings({ quiet });
+    const selectedModels =
+      helpers && typeof helpers.normalizeIdList === "function"
+        ? helpers.normalizeIdList(state.selectedModels)
+        : [];
+    if (!quiet && output && typeof output.printInfo === "function") {
+      output.printInfo("Auto-syncing selected models to Droid...");
+    }
+    const syncResult = await sync.syncDroidSettings({ quiet, selectedModels });
     if (loginResult && typeof loginResult === "object") {
       return { ...loginResult, syncResult };
     }

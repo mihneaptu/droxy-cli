@@ -127,16 +127,7 @@ function createSyncApi(overrides = {}) {
   }
 
   function normalizeSelectedModelIds(selectedModels) {
-    const seen = new Set();
-    const output = [];
-    for (const item of Array.isArray(selectedModels) ? selectedModels : []) {
-      const value = String(item || "").trim();
-      if (!value || seen.has(value)) continue;
-      seen.add(value);
-      output.push(value);
-    }
-    output.sort((left, right) => left.localeCompare(right));
-    return output;
+    return helpers.normalizeIdList(selectedModels);
   }
 
   function filterDetectedEntriesBySelection(entries, selectedModels, options = {}) {
@@ -824,6 +815,9 @@ function createSyncApi(overrides = {}) {
     }
 
     detectedEntries = filtered.entries;
+    const syncedModelIds = normalizeSelectedModelIds(
+      detectedEntries.map((entry) => (entry && entry.id ? entry.id : ""))
+    );
     const split = splitModelsForFactoryEntries(detectedEntries);
 
     let result;
@@ -852,9 +846,9 @@ function createSyncApi(overrides = {}) {
     config.updateState({
       lastFactorySyncAt: new Date().toISOString(),
       ...(hasExplicitSelection
-        ? { selectedModels: filtered.selectedIds }
-        : filtered.selectedIds.length
-          ? { selectedModels: filtered.selectedIds }
+        ? { selectedModels: syncedModelIds }
+        : syncedModelIds.length
+          ? { selectedModels: syncedModelIds }
           : {}),
       factory: {
         enabled: true,
@@ -875,9 +869,9 @@ function createSyncApi(overrides = {}) {
       result: {
         ...result,
         ...(hasExplicitSelection
-          ? { selectedModels: filtered.selectedIds, selectedModelsSkipped: filtered.skippedCount }
-          : filtered.selectedIds.length
-            ? { selectedModels: filtered.selectedIds, selectedModelsSkipped: filtered.skippedCount }
+          ? { selectedModels: syncedModelIds, selectedModelsSkipped: filtered.skippedCount }
+          : syncedModelIds.length
+            ? { selectedModels: syncedModelIds, selectedModelsSkipped: filtered.skippedCount }
             : {}),
       },
     };

@@ -1,5 +1,7 @@
 "use strict";
 
+const helpers = require("../helpers");
+
 const HOME_ACTIONS = Object.freeze({
   chooseModels: { id: "choose_models", label: "Choose Models" },
   connectProvider: { id: "connect_provider", label: "Connect Provider" },
@@ -14,16 +16,7 @@ function normalizeText(value) {
 }
 
 function normalizeModelIds(items) {
-  const seen = new Set();
-  const output = [];
-  for (const item of Array.isArray(items) ? items : []) {
-    const value = normalizeText(item);
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    output.push(value);
-  }
-  output.sort((left, right) => left.localeCompare(right));
-  return output;
+  return helpers.normalizeIdList(items);
 }
 
 function normalizeProviderHint(value) {

@@ -73,18 +73,10 @@ function createInteractiveApi(overrides = {}) {
     let modelEntries = [];
     let detectedProtocol = null;
     try {
-      const fetchResult = await fetchModelEntriesForSelection({ config, proxy, sync });
-      if (Array.isArray(fetchResult)) {
-        modelEntries = fetchResult;
-      } else {
-        modelEntries = Array.isArray(fetchResult && fetchResult.entries)
-          ? fetchResult.entries
-          : [];
-        detectedProtocol =
-          fetchResult && typeof fetchResult.protocol === "string" && fetchResult.protocol
-            ? fetchResult.protocol
-            : null;
-      }
+      const { entries = [], protocol = null } =
+        await fetchModelEntriesForSelection({ config, proxy, sync });
+      modelEntries = Array.isArray(entries) ? entries : [];
+      detectedProtocol = typeof protocol === "string" && protocol ? protocol : null;
       spinner.succeed(`Loaded ${modelEntries.length} model${modelEntries.length === 1 ? "" : "s"}.`);
     } catch (err) {
       spinner.fail("Model fetch failed.");

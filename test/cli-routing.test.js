@@ -7,10 +7,22 @@ const { runCli } = require("../droxy.js");
 
 function createDeps() {
   const calls = [];
+  const state = {
+    selectedModels: ["gpt-5"],
+  };
   return {
     calls,
     deps: {
       version: "0.1.0",
+      config: {
+        readState: () => state,
+      },
+      helpers: {
+        normalizeIdList: (items) =>
+          Array.from(new Set(Array.isArray(items) ? items.map((item) => String(item || "").trim()) : []))
+            .filter(Boolean)
+            .sort((left, right) => left.localeCompare(right)),
+      },
       output: {
         log: (msg) => calls.push(["log", String(msg)]),
         printInfo: (msg) => calls.push(["printInfo", String(msg)]),
@@ -60,8 +72,8 @@ test("routes login/connect with automatic model sync defaults", async () => {
       "loginFlow",
       { providerId: "claude", selectModels: true, quiet: false },
     ],
-    ["printInfo", "Auto-syncing detected models to Droid..."],
-    ["syncDroidSettings", { quiet: false }],
+    ["printInfo", "Auto-syncing selected models to Droid..."],
+    ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
   ]);
 
   const withModels = createDeps();
@@ -71,8 +83,19 @@ test("routes login/connect with automatic model sync defaults", async () => {
       "loginFlow",
       { providerId: "codex", selectModels: true, quiet: false },
     ],
-    ["printInfo", "Auto-syncing detected models to Droid..."],
-    ["syncDroidSettings", { quiet: false }],
+    ["printInfo", "Auto-syncing selected models to Droid..."],
+    ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
+  ]);
+
+  const noSelection = createDeps();
+  noSelection.deps.config.readState = () => ({});
+  await runCli(["login", "claude"], noSelection.deps);
+  assert.deepEqual(noSelection.calls, [
+    [
+      "loginFlow",
+      { providerId: "claude", selectModels: true, quiet: false },
+    ],
+    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models."],
   ]);
 
   const connect = createDeps();
