@@ -13,10 +13,12 @@ const {
   getConnectedProvidersWithStatus,
   getProvidersWithStatus,
   promptModelSelection,
+  promptThinkingModelModes,
   promptThinkingModelSelection,
   promptProviderModelsSelection,
   promptProviderSelection,
   readDroidSyncedModelIdsByProvider,
+  resolveThinkingModelModes,
   resolveThinkingModels,
 } = require("./interactiveSelection");
 const {
@@ -172,9 +174,15 @@ function createInteractiveApi(overrides = {}) {
     const existingThinkingModels = normalizeModelIds(currentState.thinkingModels || []).filter((modelId) =>
       selectedModels.includes(modelId)
     );
+    const existingThinkingModelModes =
+      currentState.thinkingModelModes && typeof currentState.thinkingModelModes === "object"
+        ? currentState.thinkingModelModes
+        : {};
+    const hasSavedThinkingSelection = Array.isArray(currentState.thinkingModels);
     const initialThinkingModels = resolveThinkingModels(
       selectedModels,
-      existingThinkingModels
+      existingThinkingModels,
+      { hasSavedThinkingSelection }
     );
     const thinkingSelection = await promptThinkingModelSelection(
       menu,
@@ -185,10 +193,24 @@ function createInteractiveApi(overrides = {}) {
       thinkingSelection && !thinkingSelection.cancelled
         ? normalizeModelIds(thinkingSelection.selected)
         : existingThinkingModels;
+    const initialThinkingModelModes = resolveThinkingModelModes(
+      thinkingModels,
+      existingThinkingModelModes
+    );
+    const thinkingModelModes = await promptThinkingModelModes(
+      menu,
+      thinkingModels,
+      initialThinkingModelModes
+    );
+    const effectiveThinkingModelModes = Object.fromEntries(
+      Object.entries(thinkingModelModes).filter(([, mode]) => mode !== "none")
+    );
+    const effectiveThinkingModels = normalizeModelIds(Object.keys(effectiveThinkingModelModes));
 
     config.updateState({
       selectedModels,
-      thinkingModels,
+      thinkingModels: effectiveThinkingModels,
+      thinkingModelModes: effectiveThinkingModelModes,
       lastInteractiveActionAt: now(),
     });
 
@@ -200,8 +222,13 @@ function createInteractiveApi(overrides = {}) {
       output.printSuccess(`Cleared selected models for ${providerGroup.label}.`);
     }
     output.printSuccess(
-      `Thinking enabled for ${thinkingModels.length} selected model${thinkingModels.length === 1 ? "" : "s"}.`
+      `Thinking enabled for ${effectiveThinkingModels.length} selected model${effectiveThinkingModels.length === 1 ? "" : "s"}.`
     );
+    if (effectiveThinkingModels.length) {
+      output.printSuccess(
+        `Thinking modes saved for ${Object.keys(effectiveThinkingModelModes).length} model${Object.keys(effectiveThinkingModelModes).length === 1 ? "" : "s"}.`
+      );
+    }
 
     if (!selectedModels.length) {
       output.printInfo("No models selected overall. Clearing Droxy-managed models in Droid.");

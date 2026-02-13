@@ -122,6 +122,10 @@ test("interactive mode chooses provider-first models and syncs merged selection"
   assert.match(selectMultipleCalls[0].title, /Choose models/i);
   assert.deepEqual(selectMultipleCalls[0].items, ["gpt-5"]);
   assert.match(selectMultipleCalls[1].title, /Choose thinking models/i);
+  assert.equal(
+    selectSingleCalls.some((call) => /Thinking mode\s+•\s+gpt-5/i.test(call.title || "")),
+    true
+  );
 
   assert.deepEqual(state.selectedModels, ["claude-opus", "gpt-5"]);
   assert.equal(syncCalls.length, 1);
