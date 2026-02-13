@@ -83,7 +83,7 @@ function printSmartSuggestion(state) {
   } else if (state.providersCount === 0) {
     suggestion = "droxy login";
   } else if (state.modelsCount === 0) {
-    suggestion = "droxy ui (Choose Models auto-syncs Droid)";
+    suggestion = "droxy (Choose Models auto-syncs Droid)";
   }
 
   if (!suggestion) return;

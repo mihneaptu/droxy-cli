@@ -715,7 +715,7 @@ function createSyncApi(overrides = {}) {
           why: "Droid sync requires local Droxy config values (host, port, auth).",
           next: [
             "Run: droxy login",
-            "Then run: droxy ui and choose models",
+            "Then run: droxy and choose models",
           ],
         });
       }
@@ -762,7 +762,7 @@ function createSyncApi(overrides = {}) {
             next: [
               "Run: droxy start",
               "Run: droxy status --verbose",
-              "Then open: droxy ui",
+              "Then open: droxy",
             ],
           });
         }
@@ -783,7 +783,7 @@ function createSyncApi(overrides = {}) {
             next: [
               "Verify your provider login: droxy login <provider>",
               "Check proxy health: droxy status --verbose",
-              "Retry via interactive auto-sync: droxy ui",
+              "Retry via interactive auto-sync: droxy",
             ],
           });
         }
@@ -803,7 +803,7 @@ function createSyncApi(overrides = {}) {
           next: [
             "Run: droxy status --verbose",
             "Re-select models in interactive mode",
-            "Retry via interactive auto-sync: droxy ui",
+            "Retry via interactive auto-sync: droxy",
           ],
         });
       }

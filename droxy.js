@@ -19,7 +19,6 @@ const KNOWN_COMMANDS = [
   "status",
   "login",
   "connect",
-  "ui",
   "help",
   "version",
 ];
@@ -198,21 +197,29 @@ function printHelp(output = outputModule) {
     "",
     "Usage:",
     "  droxy",
-    "  droxy ui",
     "  droxy start [--quiet]",
     "  droxy stop [--force] [--quiet]",
     "  droxy status [--check] [--json] [--verbose] [--quiet]",
-    "  droxy login [provider] [--with-models|--skip-models]",
-    "  droxy connect [provider] [--with-models|--skip-models]",
+    "  droxy login [provider] [--with-models|--skip-models] [--quiet]",
+    "  droxy connect [provider] [--with-models|--skip-models] [--quiet]",
     "  droxy help",
     "  droxy version",
     "",
-  "Flags:",
-    "  --with-models   Legacy alias; model auto-sync is enabled by default",
+    "Migration:",
+    "  `droxy ui` was removed. Use: droxy",
+    "",
+    "Flags:",
+    "  --with-models   Legacy alias; model auto-sync is already the default",
     "  --skip-models   Login only, skip automatic model sync",
+    "  --quiet         Suppress non-essential info lines",
+    "  --json          Stable machine-readable output for scripts (status)",
     "",
     "Providers:",
     "  gemini, codex, claude, qwen, kimi, iflow, antigravity",
+    "",
+    "Scripting notes:",
+    "  - Use `droxy status --json` for automation",
+    "  - Disable color with NO_COLOR=1 or DROXY_NO_COLOR=1",
     "",
     "Workflow docs:",
     "  docs/WORKFLOW.md",
@@ -318,7 +325,7 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
     const hasPersistedSelection = Array.isArray(state.selectedModels);
     if (!hasPersistedSelection) {
       if (!quiet && output && typeof output.printInfo === "function") {
-        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models.");
+        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models.");
       }
       return loginResult;
     }
@@ -337,13 +344,10 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
   }
 
   if (parsed.command === "ui") {
-    if (isInteractiveSession(options)) {
-      return interactive.runInteractiveHome();
-    }
     printGuided(output, {
-      what: "Interactive mode requires a TTY terminal.",
-      why: "No interactive stdin/stdout is available in this session.",
-      next: ["Run: droxy help"],
+      what: "`droxy ui` was removed.",
+      why: "`droxy` now opens interactive setup directly.",
+      next: ["Use: droxy", "Run: droxy help"],
     });
     process.exitCode = 1;
     return undefined;

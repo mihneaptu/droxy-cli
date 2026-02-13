@@ -95,7 +95,7 @@ test("routes login/connect with automatic model sync defaults", async () => {
       "loginFlow",
       { providerId: "claude", selectModels: true, quiet: false },
     ],
-    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models."],
+    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models."],
   ]);
 
   const connect = createDeps();
@@ -106,14 +106,29 @@ test("routes login/connect with automatic model sync defaults", async () => {
   ]]);
 });
 
-test("routes no-arg and ui command to interactive home", async () => {
+test("routes no-arg command to interactive home", async () => {
   const first = createDeps();
   await runCli([], first.deps);
   assert.deepEqual(first.calls, [["runInteractiveHome"]]);
+});
 
-  const second = createDeps();
-  await runCli(["ui"], second.deps);
-  assert.deepEqual(second.calls, [["runInteractiveHome"]]);
+test("ui command prints migration guidance", async () => {
+  const previousExitCode = process.exitCode;
+  const target = createDeps();
+  try {
+    process.exitCode = 0;
+    await runCli(["ui"], target.deps);
+    assert.equal(process.exitCode, 1);
+    const guided = target.calls.find((entry) => entry[0] === "printGuidedError");
+    assert.ok(guided, "printGuidedError should have been called");
+    assert.match(String(guided[1].what || ""), /was removed/i);
+    assert.ok(
+      Array.isArray(guided[1].next) && guided[1].next.some((step) => /Use: droxy/.test(step)),
+      "Migration guidance should suggest using 'droxy'"
+    );
+  } finally {
+    process.exitCode = previousExitCode;
+  }
 });
 
 test("prints help for no-arg in non-interactive sessions", async () => {
@@ -149,7 +164,10 @@ test("unknown command prints suggestion and help", async () => {
       Array.isArray(guided[1].next) && guided[1].next.some((step) => /droxy status/.test(step)),
       true
     );
-    assert.equal(target.calls.some((entry) => /Usage:/.test(entry[1]) || /Droxy CLI/.test(entry[1])), true);
+    assert.equal(
+      target.calls.some((entry) => /Usage:/.test(entry[1]) || /Droxy CLI/.test(entry[1])),
+      true
+    );
   } finally {
     process.exitCode = previousExitCode;
   }
