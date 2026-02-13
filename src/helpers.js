@@ -84,7 +84,8 @@ function isAdvancedThinkingMode(value) {
 function supportsAdvancedThinkingModes(modelId) {
   const normalized = stripThinkingSuffix(modelId).toLowerCase();
   if (!normalized) return false;
-  return ADVANCED_THINKING_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+  const baseModelId = normalized.includes("/") ? normalized.split("/").pop() || "" : normalized;
+  return ADVANCED_THINKING_MODEL_PREFIXES.some((prefix) => baseModelId.startsWith(prefix));
 }
 
 function formatErrorSummary(err) {

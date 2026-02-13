@@ -484,6 +484,48 @@ test("fetchAvailableModelEntries falls back to auth-files exclusion when oauth-e
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
 });
 
+test("fetchAvailableModelEntries excludes slash-delimited auth-files model IDs when oauth-excluded-models errors", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "openai/gpt-5", provider: "openai" },
+            { id: "gpt-5", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 500,
+        body: { error: "proxy unavailable" },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              status_message:
+                "{\"detail\":\"The 'openai/gpt-5' model is not supported when using Codex with a ChatGPT account.\"}",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
 test("fetchAvailableModelEntries uses plaintext management key from state when config key is hashed", async () => {
   const api = sync.createSyncApi({
     http: createRouteRequestMock({
@@ -712,6 +754,71 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
       "gpt-5(high)",
     ]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "gpt-5": "high" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt-5 models", async () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    let updatedState = null;
+    const failRequest = () => {
+      throw new Error("network should not be used");
+    };
+
+    const api = sync.createSyncApi({
+      config: {
+        DEFAULT_PORT: 8317,
+        configExists: () => true,
+        ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+        readConfigValues: () => ({
+          host: "127.0.0.1",
+          port: 8317,
+          tlsEnabled: false,
+          apiKey: "k",
+        }),
+        readState: () => ({
+          apiKey: "k",
+          thinkingModels: ["openai/gpt-5"],
+          thinkingModelModes: { "openai/gpt-5": "high" },
+        }),
+        updateState: (patch) => {
+          updatedState = patch;
+          return patch;
+        },
+      },
+      http: { request: failRequest },
+      https: { request: failRequest },
+      output: {
+        printGuidedError: () => {},
+        printSuccess: () => {},
+      },
+    });
+
+    const result = await api.syncDroidSettings({
+      quiet: true,
+      selectedModels: ["openai/gpt-5"],
+      detectedEntries: [{ id: "openai/gpt-5", provider: "openai" }],
+      protocol: "http",
+    });
+
+    assert.equal(result.success, true);
+    const configPath = path.join(process.env.DROXY_FACTORY_DIR, "config.json");
+    const settingsPath = path.join(process.env.DROXY_FACTORY_DIR, "settings.json");
+    const configRoot = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const settingsRoot = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    assert.deepEqual((configRoot.custom_models || []).map((entry) => entry.model), [
+      "openai/gpt-5",
+      "openai/gpt-5(high)",
+    ]);
+    assert.deepEqual((settingsRoot.customModels || []).map((entry) => entry.model), [
+      "openai/gpt-5",
+      "openai/gpt-5(high)",
+    ]);
+    assert.deepEqual(updatedState && updatedState.thinkingModelModes, {
+      "openai/gpt-5": "high",
+    });
   } finally {
     cleanup();
   }

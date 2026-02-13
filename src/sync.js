@@ -860,8 +860,8 @@ function createSyncApi(overrides = {}) {
   function parseUnsupportedModelIdsFromStatusMessage(statusMessage) {
     const ids = new Set();
     const patterns = [
-      /['"`]([A-Za-z0-9][A-Za-z0-9._:-]*)['"`]\s+model\b/gi,
-      /\bmodel\s+['"`]([A-Za-z0-9][A-Za-z0-9._:-]*)['"`]/gi,
+      /['"`]([A-Za-z0-9][A-Za-z0-9._:/-]*)['"`]\s+model\b/gi,
+      /\bmodel\s+['"`]([A-Za-z0-9][A-Za-z0-9._:/-]*)['"`]/gi,
     ];
 
     for (const text of collectStatusMessageTexts(statusMessage)) {
