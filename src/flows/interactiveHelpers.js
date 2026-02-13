@@ -48,13 +48,13 @@ function resolveProviderFromHint(value) {
   return "";
 }
 
-function extractModelIdFromEntry(entry) {
+function resolveProviderForModelEntry(entry) {
   if (!entry || typeof entry !== "object") return "";
-  return normalizeText(entry.id || entry.model || entry.name || entry.slug);
-}
 
-function resolveProviderFromEntryMetadata(entry) {
-  if (!entry || typeof entry !== "object") return "";
+  const modelId = entry.id || entry.model || entry.name || entry.slug || "";
+  const fromModelId = resolveProviderFromHint(modelId);
+  if (fromModelId) return fromModelId;
+
   let raw =
     entry.provider ||
     entry.provider_id ||
@@ -77,16 +77,6 @@ function resolveProviderFromEntryMetadata(entry) {
   return resolveProviderFromHint(raw);
 }
 
-function resolveProviderForModelEntry(entry) {
-  if (!entry || typeof entry !== "object") return "";
-
-  const modelId = extractModelIdFromEntry(entry);
-  const fromModelId = resolveProviderFromHint(modelId);
-  if (fromModelId) return fromModelId;
-
-  return resolveProviderFromEntryMetadata(entry);
-}
-
 function buildProviderModelGroups(entries, providerStatuses) {
   const providers = Array.isArray(providerStatuses) ? providerStatuses : [];
   const providerMap = new Map();
@@ -102,16 +92,10 @@ function buildProviderModelGroups(entries, providerStatuses) {
   }
 
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const modelId = extractModelIdFromEntry(entry);
+    const modelId = normalizeText(entry && entry.id ? entry.id : "");
     if (!modelId) continue;
 
-    let providerId = resolveProviderForModelEntry(entry);
-    if (!providerMap.has(providerId)) {
-      const explicitProviderId = resolveProviderFromEntryMetadata(entry);
-      if (providerMap.has(explicitProviderId)) {
-        providerId = explicitProviderId;
-      }
-    }
+    const providerId = resolveProviderForModelEntry(entry);
     if (providerId && providerMap.has(providerId)) {
       providerMap.get(providerId).models.push(modelId);
     }
