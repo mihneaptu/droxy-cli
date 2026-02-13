@@ -53,6 +53,11 @@ function extractModelIdFromEntry(entry) {
   return normalizeText(entry.id || entry.model || entry.name || entry.slug);
 }
 
+function extractProviderValue(value) {
+  if (!value || typeof value !== "object") return value;
+  return value.id || value.name || value.provider;
+}
+
 function resolveProviderFromEntryOwnerMetadata(entry) {
   if (!entry || typeof entry !== "object") return "";
   let raw =
@@ -65,10 +70,7 @@ function resolveProviderFromEntryOwnerMetadata(entry) {
     raw = entry.meta.owner;
   }
 
-  if (raw && typeof raw === "object") {
-    raw = raw.id || raw.name || raw.provider;
-  }
-
+  raw = extractProviderValue(raw);
   return resolveProviderFromHint(raw);
 }
 
@@ -85,10 +87,7 @@ function resolveProviderFromEntryProviderMetadata(entry) {
     raw = entry.meta.provider;
   }
 
-  if (raw && typeof raw === "object") {
-    raw = raw.id || raw.name || raw.provider;
-  }
-
+  raw = extractProviderValue(raw);
   return resolveProviderFromHint(raw);
 }
 
