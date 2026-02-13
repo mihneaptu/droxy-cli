@@ -109,15 +109,6 @@ const UNSUPPORTED_MODEL_HINTS = Object.freeze([
   "not allowed",
   "denied",
 ]);
-const THINKING_MODE_VALUES = Object.freeze([
-  "auto",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "none",
-]);
 
 function createSyncApi(overrides = {}) {
   const fsApi = overrides.fs || fs;
@@ -237,43 +228,31 @@ function createSyncApi(overrides = {}) {
     return helpers.normalizeIdList(selectedModels);
   }
 
-  function stripThinkingSuffix(modelId) {
-    const normalized = String(modelId || "").trim();
-    if (!normalized) return "";
-    return normalized.replace(/\(([^()]*)\)\s*$/, "").trim();
-  }
+  const stripThinkingSuffix =
+    typeof helpers.stripThinkingSuffix === "function"
+      ? helpers.stripThinkingSuffix
+      : helpersModule.stripThinkingSuffix;
+  const normalizeThinkingMode =
+    typeof helpers.normalizeThinkingMode === "function"
+      ? helpers.normalizeThinkingMode
+      : helpersModule.normalizeThinkingMode;
+  const normalizeThinkingModelModes =
+    typeof helpers.normalizeThinkingModelModes === "function"
+      ? helpers.normalizeThinkingModelModes
+      : helpersModule.normalizeThinkingModelModes;
+  const isAdvancedThinkingMode =
+    typeof helpers.isAdvancedThinkingMode === "function"
+      ? helpers.isAdvancedThinkingMode
+      : helpersModule.isAdvancedThinkingMode;
+  const supportsAdvancedThinkingModes =
+    typeof helpers.supportsAdvancedThinkingModes === "function"
+      ? helpers.supportsAdvancedThinkingModes
+      : helpersModule.supportsAdvancedThinkingModes;
 
   function normalizeThinkingModelIds(thinkingModels) {
     return normalizeSelectedModelIds(thinkingModels)
       .map((modelId) => stripThinkingSuffix(modelId))
       .filter(Boolean);
-  }
-
-  function normalizeThinkingMode(value) {
-    const normalized = String(value || "").trim().toLowerCase();
-    if (THINKING_MODE_VALUES.includes(normalized)) return normalized;
-    return "";
-  }
-
-  function isAdvancedThinkingMode(value) {
-    return (
-      value === "minimal" ||
-      value === "low" ||
-      value === "medium" ||
-      value === "high" ||
-      value === "xhigh"
-    );
-  }
-
-  function supportsAdvancedThinkingModes(modelId) {
-    const normalized = stripThinkingSuffix(modelId).toLowerCase();
-    if (!normalized) return false;
-    return (
-      normalized.startsWith("gpt-5") ||
-      normalized.startsWith("o1") ||
-      normalized.startsWith("o3") ||
-      normalized.startsWith("o4")
-    );
   }
 
   function normalizeThinkingModeForModel(modelId, mode) {
@@ -284,18 +263,6 @@ function createSyncApi(overrides = {}) {
     if (!isAdvancedThinkingMode(normalizedMode)) return "auto";
     if (!supportsAdvancedThinkingModes(modelId)) return "auto";
     return normalizedMode;
-  }
-
-  function normalizeThinkingModelModes(thinkingModelModes) {
-    if (!thinkingModelModes || typeof thinkingModelModes !== "object") return {};
-    const output = {};
-    for (const [modelId, mode] of Object.entries(thinkingModelModes)) {
-      const normalizedModelId = stripThinkingSuffix(modelId);
-      const normalizedMode = normalizeThinkingMode(mode);
-      if (!normalizedModelId || !normalizedMode) continue;
-      output[normalizedModelId.toLowerCase()] = normalizedMode;
-    }
-    return output;
   }
 
   function appendThinkingVariant(baseModelId, mode, outputModels) {
@@ -1122,7 +1089,7 @@ function createSyncApi(overrides = {}) {
   function firstDefinedPathValue(root, paths) {
     for (const pathParts of paths) {
       const value = getNestedValue(root, pathParts);
-      if (value !== undefined) return value;
+      if (value !== undefined && value !== null) return value;
     }
     return undefined;
   }

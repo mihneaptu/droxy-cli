@@ -1,21 +1,17 @@
 "use strict";
 
 const fs = require("fs");
+const helpers = require("../helpers");
 const { COLORS, colorize } = require("../ui/colors");
 const {
   normalizeModelIds,
   normalizeText,
   resolveProviderForModelEntry,
 } = require("./interactiveHelpers");
-const THINKING_MODE_VALUES = Object.freeze([
-  "auto",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "none",
-]);
+const THINKING_MODE_VALUES = helpers.THINKING_MODE_VALUES;
+const normalizeThinkingMode = helpers.normalizeThinkingMode;
+const normalizeThinkingModelModes = helpers.normalizeThinkingModelModes;
+const stripThinkingSuffix = helpers.stripThinkingSuffix;
 
 function getProvidersWithStatus(login, configValues) {
   if (login && typeof login.getProvidersWithConnectionStatus === "function") {
@@ -97,12 +93,6 @@ function fallbackDroxyManagedCheck(entry) {
     (entry && (entry.displayName || entry.model_display_name || "")) || ""
   );
   return label.startsWith("Droxy • ");
-}
-
-function stripThinkingSuffix(modelId) {
-  const value = normalizeText(modelId);
-  if (!value) return "";
-  return value.replace(/\(([^()]*)\)\s*$/, "").trim();
 }
 
 function normalizeEntryForProviderResolution(entry) {
@@ -199,24 +189,6 @@ function isLikelyThinkingModelId(modelId) {
   const value = normalizeText(modelId).toLowerCase();
   if (!value) return false;
   return /(^|[-_.])(thinking|reasoning)([-_.]|$)/.test(value);
-}
-
-function normalizeThinkingMode(value) {
-  const normalized = normalizeText(value).toLowerCase();
-  if (THINKING_MODE_VALUES.includes(normalized)) return normalized;
-  return "";
-}
-
-function normalizeThinkingModelModes(thinkingModelModes = {}) {
-  const output = {};
-  if (!thinkingModelModes || typeof thinkingModelModes !== "object") return output;
-  for (const [modelId, mode] of Object.entries(thinkingModelModes)) {
-    const normalizedModelId = normalizeText(modelId);
-    const normalizedMode = normalizeThinkingMode(mode);
-    if (!normalizedModelId || !normalizedMode) continue;
-    output[normalizedModelId.toLowerCase()] = normalizedMode;
-  }
-  return output;
 }
 
 function resolveThinkingModelModes(thinkingModels, existingThinkingModelModes = {}) {
@@ -339,9 +311,9 @@ function resolveThinkingModels(models, existingThinkingModels = [], options = {}
     return explicitThinkingCandidates;
   }
 
-  const candidateSet = new Set(explicitThinkingCandidates);
+  const selectedSet = new Set(selected);
   return normalizeModelIds(
-    normalizeModelIds(existingThinkingModels).filter((modelId) => candidateSet.has(modelId))
+    normalizeModelIds(existingThinkingModels).filter((modelId) => selectedSet.has(modelId))
   );
 }
 

@@ -309,6 +309,29 @@ test("fetchAvailableModelEntries filters models with restricted status hints", a
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
 });
 
+test("fetchAvailableModelEntries continues entitlement fallback when earlier hints are null", async () => {
+  const api = sync.createSyncApi({
+    http: createRequestMock({
+      data: [
+        { id: "gpt-5", provider: "openai", available: true },
+        {
+          id: "gpt-5.3-codex-spark",
+          provider: "openai",
+          restricted: null,
+          meta: { restricted: true },
+        },
+      ],
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    { protocolResolution: { reachable: true, protocol: "http" }, state: {} }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
 test("fetchAvailableModelEntries excludes models from oauth-excluded-models management endpoint", async () => {
   const api = sync.createSyncApi({
     http: createRouteRequestMock({

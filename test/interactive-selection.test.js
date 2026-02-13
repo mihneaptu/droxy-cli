@@ -142,14 +142,14 @@ test("resolveThinkingModels defaults to explicit thinking/reasoning markers only
   assert.deepEqual(models, ["claude-opus-4-6-thinking", "model-reasoning"]);
 });
 
-test("resolveThinkingModels honors saved thinking selection when present", () => {
+test("resolveThinkingModels preserves saved thinking selection when present", () => {
   const models = resolveThinkingModels(
     ["claude-opus-4-6-thinking", "model-reasoning", "gpt-5"],
     ["model-reasoning", "gpt-5"],
     { hasSavedThinkingSelection: true }
   );
 
-  assert.deepEqual(models, ["model-reasoning"]);
+  assert.deepEqual(models, ["gpt-5", "model-reasoning"]);
 });
 
 test("resolveThinkingModelModes keeps saved mode and defaults missing mode to medium", () => {

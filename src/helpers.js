@@ -4,6 +4,24 @@ const { execFileSync } = require("child_process");
 const net = require("net");
 const path = require("path");
 
+const THINKING_MODE_VALUES = Object.freeze([
+  "auto",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "none",
+]);
+const ADVANCED_THINKING_MODES = new Set([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+]);
+const ADVANCED_THINKING_MODEL_PREFIXES = Object.freeze(["gpt-5", "o1", "o3", "o4"]);
+
 function isWindows() {
   return process.platform === "win32";
 }
@@ -33,6 +51,40 @@ function normalizeIdList(items) {
   }
   output.sort((left, right) => left.localeCompare(right));
   return output;
+}
+
+function stripThinkingSuffix(modelId) {
+  const normalized = String(modelId || "").trim();
+  if (!normalized) return "";
+  return normalized.replace(/\(([^()]*)\)\s*$/, "").trim();
+}
+
+function normalizeThinkingMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (THINKING_MODE_VALUES.includes(normalized)) return normalized;
+  return "";
+}
+
+function normalizeThinkingModelModes(thinkingModelModes = {}) {
+  const output = {};
+  if (!thinkingModelModes || typeof thinkingModelModes !== "object") return output;
+  for (const [modelId, mode] of Object.entries(thinkingModelModes)) {
+    const normalizedModelId = stripThinkingSuffix(modelId);
+    const normalizedMode = normalizeThinkingMode(mode);
+    if (!normalizedModelId || !normalizedMode) continue;
+    output[normalizedModelId.toLowerCase()] = normalizedMode;
+  }
+  return output;
+}
+
+function isAdvancedThinkingMode(value) {
+  return ADVANCED_THINKING_MODES.has(value);
+}
+
+function supportsAdvancedThinkingModes(modelId) {
+  const normalized = stripThinkingSuffix(modelId).toLowerCase();
+  if (!normalized) return false;
+  return ADVANCED_THINKING_MODEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
 function formatErrorSummary(err) {
@@ -174,19 +226,26 @@ function killPidByPort(port, options = {}) {
 }
 
 module.exports = {
+  ADVANCED_THINKING_MODEL_PREFIXES,
   checkPort,
   formatErrorSummary,
   getWindowsPidByPort,
+  isAdvancedThinkingMode,
   isLikelyDroxyProcess,
   isWindows,
   killPid,
   killPidByPort,
   normalizeIdList,
+  normalizeThinkingMode,
+  normalizeThinkingModelModes,
   normalizeUrl,
   normalizedHost,
   runCommandOutput,
   runCommandSync,
   sleep,
+  stripThinkingSuffix,
+  supportsAdvancedThinkingModes,
+  THINKING_MODE_VALUES,
   waitForPort,
   waitForPortClosed,
 };
