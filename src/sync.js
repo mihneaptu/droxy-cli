@@ -821,39 +821,33 @@ function createSyncApi(overrides = {}) {
 
   function collectStatusMessageTexts(statusMessage) {
     const texts = [];
+
+    function appendTextsFromObject(value) {
+      if (!value || typeof value !== "object") return;
+      for (const key of ["detail", "message", "error", "reason", "status_message"]) {
+        const text = value[key];
+        if (typeof text === "string" && text.trim()) {
+          texts.push(text.trim());
+        }
+      }
+      const directModel = extractModelIdFromEntry(value);
+      if (directModel) {
+        texts.push(`model '${directModel}'`);
+      }
+    }
+
     if (typeof statusMessage === "string") {
       const trimmed = statusMessage.trim();
       if (trimmed) texts.push(trimmed);
       try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed && typeof parsed === "object") {
-          for (const key of ["detail", "message", "error", "reason", "status_message"]) {
-            const value = parsed[key];
-            if (typeof value === "string" && value.trim()) {
-              texts.push(value.trim());
-            }
-          }
-          const directModel = extractModelIdFromEntry(parsed);
-          if (directModel) {
-            texts.push(`model '${directModel}'`);
-          }
-        }
+        appendTextsFromObject(JSON.parse(trimmed));
       } catch {
         // Ignore non-JSON status message bodies.
       }
       return texts;
     }
-    if (!statusMessage || typeof statusMessage !== "object") return texts;
-    for (const key of ["detail", "message", "error", "reason", "status_message"]) {
-      const value = statusMessage[key];
-      if (typeof value === "string" && value.trim()) {
-        texts.push(value.trim());
-      }
-    }
-    const directModel = extractModelIdFromEntry(statusMessage);
-    if (directModel) {
-      texts.push(`model '${directModel}'`);
-    }
+
+    appendTextsFromObject(statusMessage);
     return texts;
   }
 
@@ -1008,14 +1002,16 @@ function createSyncApi(overrides = {}) {
   }
 
   async function fetchManagementModelExclusions(configValues, options = {}) {
-    const state =
+    let state = {};
+    if (
       Object.prototype.hasOwnProperty.call(options, "state") &&
       options.state &&
       typeof options.state === "object"
-        ? options.state
-        : config && typeof config.readState === "function"
-          ? config.readState() || {}
-          : {};
+    ) {
+      state = options.state;
+    } else if (config && typeof config.readState === "function") {
+      state = config.readState() || {};
+    }
 
     const managementKey = resolveManagementKey(configValues, state, options);
     if (!managementKey) return [];
