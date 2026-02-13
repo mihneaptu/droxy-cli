@@ -19,10 +19,17 @@ const KNOWN_COMMANDS = [
   "status",
   "login",
   "connect",
-  "ui",
   "help",
   "version",
 ];
+
+const COMMAND_ALIASES = {
+  up: "start",
+  down: "stop",
+  st: "status",
+  c: "login",
+  connect: "login",
+};
 
 function normalizeToken(value, fallback = "") {
   if (value === undefined || value === null) return fallback;
@@ -192,32 +199,93 @@ function suggestCommand(command) {
   return null;
 }
 
-function printHelp(output = outputModule) {
+function resolveCommand(command) {
+  const normalized = String(command || "").trim().toLowerCase();
+  if (!normalized) return "";
+  return COMMAND_ALIASES[normalized] || normalized;
+}
+
+function buildHelpLines({ short = false, verbose = false } = {}) {
+  if (short) {
+    return [
+      "Droxy CLI v0.1.0",
+      "",
+      "Quick usage:",
+      "  droxy",
+      "  droxy start|up [--quiet]",
+      "  droxy stop|down [--force] [--quiet]",
+      "  droxy status|st [--check] [--json] [--verbose] [--quiet]",
+      "  droxy login|connect|c [provider] [--skip-models] [--quiet]",
+      "  droxy help [--short|--verbose]",
+      "  droxy version",
+      "",
+      "Migration:",
+      "  `droxy ui` was removed. Use: droxy",
+    ];
+  }
+
   const lines = [
     "Droxy CLI v0.1.0",
     "",
-    "Usage:",
+    "Quick start:",
+    "  1) Open interactive setup: droxy",
+    "  2) Login directly:         droxy login claude",
+    "  3) Check proxy status:     droxy status --check",
+    "",
+    "Commands:",
     "  droxy",
-    "  droxy ui",
+    "    Open interactive setup and model selection.",
     "  droxy start [--quiet]",
+    "    Alias: droxy up",
     "  droxy stop [--force] [--quiet]",
+    "    Alias: droxy down",
     "  droxy status [--check] [--json] [--verbose] [--quiet]",
-    "  droxy login [provider] [--with-models|--skip-models]",
-    "  droxy connect [provider] [--with-models|--skip-models]",
-    "  droxy help",
+    "    Alias: droxy st",
+    "  droxy login [provider] [--with-models|--skip-models] [--quiet]",
+    "    Primary login command.",
+    "  droxy connect [provider] [--with-models|--skip-models] [--quiet]",
+    "    Compatibility alias for `droxy login`.",
+    "  droxy c [provider] [--with-models|--skip-models] [--quiet]",
+    "    Short alias for `droxy login`.",
+    "  droxy help [--short|--verbose]",
     "  droxy version",
     "",
-  "Flags:",
-    "  --with-models   Legacy alias; model auto-sync is enabled by default",
+    "Flags:",
+    "  --with-models   Legacy alias; model auto-sync is already the default",
     "  --skip-models   Login only, skip automatic model sync",
+    "  --quiet         Suppress non-essential info lines",
+    "  --json          Stable machine-readable output for scripts (status)",
     "",
     "Providers:",
     "  gemini, codex, claude, qwen, kimi, iflow, antigravity",
+    "",
+    "Scripting notes:",
+    "  - Use `droxy status --json` for automation",
+    "  - Disable color with NO_COLOR=1 or DROXY_NO_COLOR=1",
+    "",
+    "Migration:",
+    "  `droxy ui` was removed. Use: droxy",
     "",
     "Workflow docs:",
     "  docs/WORKFLOW.md",
     "  docs/CLI_STYLE_GUIDE.md",
   ];
+
+  if (!verbose) {
+    return lines;
+  }
+
+  return lines.concat([
+    "",
+    "Verbose troubleshooting:",
+    "  - If login says no provider selected, run: droxy login claude",
+    "  - If proxy binary is missing, set DROXY_PROXY_BIN or add vendor binary",
+    "  - Use `droxy status --verbose` for extra runtime details",
+  ]);
+}
+
+function printHelp(output = outputModule, options = {}) {
+  const lines = buildHelpLines(options);
 
   for (const line of lines) {
     output.log(line);
@@ -267,29 +335,33 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
   }
 
   const parsed = parseArgs(rawArgs);
+  const command = resolveCommand(parsed.command);
 
-  if (HELP_ALIASES.has(parsed.command)) {
-    printHelp(output);
+  if (HELP_ALIASES.has(parsed.command) || command === "help") {
+    printHelp(output, {
+      short: parsed.hasFlag("--short"),
+      verbose: parsed.hasFlag("--verbose"),
+    });
     return undefined;
   }
 
-  if (VERSION_ALIASES.has(parsed.command)) {
+  if (VERSION_ALIASES.has(parsed.command) || command === "version") {
     output.log(version);
     return undefined;
   }
 
-  if (parsed.command === "start") {
+  if (command === "start") {
     return proxy.startProxy({ quiet: parsed.hasFlag("--quiet"), allowAttach: true });
   }
 
-  if (parsed.command === "stop") {
+  if (command === "stop") {
     return proxy.stopProxy({
       force: parsed.hasFlag("--force"),
       quiet: parsed.hasFlag("--quiet"),
     });
   }
 
-  if (parsed.command === "status") {
+  if (command === "status") {
     return proxy.statusProxy({
       check: parsed.hasFlag("--check"),
       json: parsed.hasFlag("--json"),
@@ -298,7 +370,7 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
     });
   }
 
-  if (parsed.command === "login" || parsed.command === "connect") {
+  if (command === "login") {
     const skipModels = parsed.hasFlag("--skip-models");
     const selectModels = skipModels ? false : true;
     const quiet = parsed.hasFlag("--quiet");
@@ -318,7 +390,7 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
     const hasPersistedSelection = Array.isArray(state.selectedModels);
     if (!hasPersistedSelection) {
       if (!quiet && output && typeof output.printInfo === "function") {
-        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models.");
+        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models.");
       }
       return loginResult;
     }
@@ -337,19 +409,16 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
   }
 
   if (parsed.command === "ui") {
-    if (isInteractiveSession(options)) {
-      return interactive.runInteractiveHome();
-    }
     printGuided(output, {
-      what: "Interactive mode requires a TTY terminal.",
-      why: "No interactive stdin/stdout is available in this session.",
-      next: ["Run: droxy help"],
+      what: "`droxy ui` was removed.",
+      why: "`droxy` now opens interactive setup directly.",
+      next: ["Use: droxy", "Run: droxy help"],
     });
     process.exitCode = 1;
     return undefined;
   }
 
-  const suggestion = suggestCommand(parsed.command);
+  const suggestion = suggestCommand(command);
   if (suggestion) {
     printGuided(output, {
       what: `Unknown command "${parsed.commandToken}".`,

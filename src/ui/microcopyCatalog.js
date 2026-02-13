@@ -61,7 +61,7 @@ const CLAUDE_MICROCOPY = {
       restart: "Undo: run `droxy stop` if you want Droxy offline.",
       login: "Undo: run `droxy login` again to refresh or switch accounts.",
       droidSync:
-        "Undo: restore `~/.factory/config.json.bak` (if available), then open `droxy ui` and choose models.",
+        "Undo: restore `~/.factory/config.json.bak` (if available), then open `droxy` and choose models.",
       pluginInstall: "Undo: run `droxy plugin uninstall`.",
       pluginUninstall: "Undo: run `droxy plugin install`.",
     },

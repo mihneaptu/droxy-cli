@@ -64,6 +64,30 @@ test("routes start/stop/status commands", async () => {
   ]]);
 });
 
+test("routes power-user aliases for start/stop/status/login", async () => {
+  const up = createDeps();
+  await runCli(["up", "--quiet"], up.deps);
+  assert.deepEqual(up.calls, [["startProxy", { quiet: true, allowAttach: true }]]);
+
+  const down = createDeps();
+  await runCli(["down", "--force", "--quiet"], down.deps);
+  assert.deepEqual(down.calls, [["stopProxy", { force: true, quiet: true }]]);
+
+  const st = createDeps();
+  await runCli(["st", "--json"], st.deps);
+  assert.deepEqual(st.calls, [[
+    "statusProxy",
+    { check: false, json: true, verbose: false, quiet: false },
+  ]]);
+
+  const c = createDeps();
+  await runCli(["c", "claude", "--skip-models", "--quiet"], c.deps);
+  assert.deepEqual(c.calls, [[
+    "loginFlow",
+    { providerId: "claude", selectModels: false, quiet: true },
+  ]]);
+});
+
 test("routes login/connect with automatic model sync defaults", async () => {
   const login = createDeps();
   await runCli(["login", "claude"], login.deps);
@@ -95,7 +119,7 @@ test("routes login/connect with automatic model sync defaults", async () => {
       "loginFlow",
       { providerId: "claude", selectModels: true, quiet: false },
     ],
-    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models."],
+    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models."],
   ]);
 
   const connect = createDeps();
@@ -106,14 +130,29 @@ test("routes login/connect with automatic model sync defaults", async () => {
   ]]);
 });
 
-test("routes no-arg and ui command to interactive home", async () => {
+test("routes no-arg command to interactive home", async () => {
   const first = createDeps();
   await runCli([], first.deps);
   assert.deepEqual(first.calls, [["runInteractiveHome"]]);
+});
 
-  const second = createDeps();
-  await runCli(["ui"], second.deps);
-  assert.deepEqual(second.calls, [["runInteractiveHome"]]);
+test("ui command prints migration guidance", async () => {
+  const previousExitCode = process.exitCode;
+  const target = createDeps();
+  try {
+    process.exitCode = 0;
+    await runCli(["ui"], target.deps);
+    assert.equal(process.exitCode, 1);
+    const guided = target.calls.find((entry) => entry[0] === "printGuidedError");
+    assert.equal(Boolean(guided), true);
+    assert.match(String(guided[1].what || ""), /was removed/i);
+    assert.equal(
+      Array.isArray(guided[1].next) && guided[1].next.some((step) => /Use: droxy/.test(step)),
+      true
+    );
+  } finally {
+    process.exitCode = previousExitCode;
+  }
 });
 
 test("prints help for no-arg in non-interactive sessions", async () => {
@@ -129,6 +168,20 @@ test("help and version aliases log expected output", async () => {
   assert.equal(help.calls.length > 0, true);
   assert.equal(help.calls[0][0], "log");
   assert.match(help.calls[0][1], /Droxy CLI v0.1.0/);
+
+  const shortHelp = createDeps();
+  await runCli(["help", "--short"], shortHelp.deps);
+  assert.equal(
+    shortHelp.calls.some((entry) => entry[0] === "log" && /Quick usage:/.test(entry[1])),
+    true
+  );
+
+  const verboseHelp = createDeps();
+  await runCli(["help", "--verbose"], verboseHelp.deps);
+  assert.equal(
+    verboseHelp.calls.some((entry) => entry[0] === "log" && /Verbose troubleshooting:/.test(entry[1])),
+    true
+  );
 
   const version = createDeps();
   await runCli(["--version"], version.deps);
@@ -149,7 +202,10 @@ test("unknown command prints suggestion and help", async () => {
       Array.isArray(guided[1].next) && guided[1].next.some((step) => /droxy status/.test(step)),
       true
     );
-    assert.equal(target.calls.some((entry) => /Usage:/.test(entry[1]) || /Droxy CLI/.test(entry[1])), true);
+    assert.equal(
+      target.calls.some((entry) => /Quick start:/.test(entry[1]) || /Droxy CLI/.test(entry[1])),
+      true
+    );
   } finally {
     process.exitCode = previousExitCode;
   }
