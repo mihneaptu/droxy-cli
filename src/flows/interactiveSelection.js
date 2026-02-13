@@ -1,12 +1,17 @@
 "use strict";
 
 const fs = require("fs");
+const helpers = require("../helpers");
 const { COLORS, colorize } = require("../ui/colors");
 const {
   normalizeModelIds,
   normalizeText,
   resolveProviderForModelEntry,
 } = require("./interactiveHelpers");
+const THINKING_MODE_VALUES = helpers.THINKING_MODE_VALUES;
+const normalizeThinkingMode = helpers.normalizeThinkingMode;
+const normalizeThinkingModelModes = helpers.normalizeThinkingModelModes;
+const stripThinkingSuffix = helpers.stripThinkingSuffix;
 
 function getProvidersWithStatus(login, configValues) {
   if (login && typeof login.getProvidersWithConnectionStatus === "function") {
@@ -151,7 +156,8 @@ function readDroidSyncedModelIdsByProvider({ config, sync, fsApi = fs } = {}) {
       const providerId = resolveProviderForModelEntry(normalizedEntry);
       if (!providerId) continue;
 
-      const modelId = normalizedEntry.id;
+      const modelId = stripThinkingSuffix(normalizedEntry.id);
+      if (!modelId) continue;
       const key = `${providerId}:${modelId}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -182,14 +188,55 @@ function readDroidSyncedModelsByProvider(options = {}) {
 function isLikelyThinkingModelId(modelId) {
   const value = normalizeText(modelId).toLowerCase();
   if (!value) return false;
-  return (
-    value.includes("thinking") ||
-    value.includes("reasoning") ||
-    value.startsWith("o1") ||
-    value.startsWith("o3") ||
-    value.startsWith("o4") ||
-    /(^|[-_])r1([-.]|$)/.test(value)
-  );
+  return /(^|[-_.])(thinking|reasoning)([-_.]|$)/.test(value);
+}
+
+function resolveThinkingModelModes(thinkingModels, existingThinkingModelModes = {}) {
+  const thinkingModelIds = normalizeModelIds(thinkingModels);
+  const existingModeLookup = normalizeThinkingModelModes(existingThinkingModelModes);
+  const output = {};
+  for (const modelId of thinkingModelIds) {
+    const existingMode = existingModeLookup[modelId.toLowerCase()];
+    output[modelId] = existingMode || "medium";
+  }
+  return output;
+}
+
+function thinkingModeTitleCase(mode) {
+  const normalized = normalizeThinkingMode(mode);
+  if (!normalized) return "Medium";
+  return `${normalized[0].toUpperCase()}${normalized.slice(1)}`;
+}
+
+async function promptThinkingModeForModel(menu, modelId, initialMode = "medium") {
+  const modeOptions = THINKING_MODE_VALUES.slice();
+  const modeItems = modeOptions.map(thinkingModeTitleCase);
+  const normalizedInitialMode = normalizeThinkingMode(initialMode) || "medium";
+  const initialIndex = Math.max(0, modeOptions.indexOf(normalizedInitialMode));
+  const selection = await menu.selectSingle({
+    title: `Thinking mode • ${modelId}`,
+    items: modeItems,
+    initialIndex,
+    hint: "Use ↑/↓ and Enter. Press q to keep current mode.",
+  });
+  if (!selection || selection.cancelled) return normalizedInitialMode;
+  return modeOptions[selection.index] || normalizedInitialMode;
+}
+
+async function promptThinkingModelModes(menu, thinkingModels, initialModes = {}) {
+  const thinkingModelIds = normalizeModelIds(thinkingModels);
+  if (!thinkingModelIds.length) return {};
+  const modeLookup = normalizeThinkingModelModes(initialModes);
+  const output = {};
+  for (const modelId of thinkingModelIds) {
+    const nextMode = await promptThinkingModeForModel(
+      menu,
+      modelId,
+      modeLookup[modelId.toLowerCase()] || "medium"
+    );
+    output[modelId] = normalizeThinkingMode(nextMode) || "medium";
+  }
+  return output;
 }
 
 function dedupeModelEntries(entries) {
@@ -225,7 +272,7 @@ async function fetchModelEntriesForSelection({ config, proxy, sync }) {
 
   const entries = await sync.fetchAvailableModelEntries(
     { ...values, apiKey },
-    { protocolResolution }
+    { protocolResolution, state }
   );
 
   return {
@@ -252,13 +299,21 @@ async function promptThinkingModelSelection(menu, models, initialSelected) {
   });
 }
 
-function resolveThinkingModels(models, existingThinkingModels = []) {
+function resolveThinkingModels(models, existingThinkingModels = [], options = {}) {
   const selected = normalizeModelIds(models);
-  const currentSet = new Set(
-    normalizeModelIds(existingThinkingModels).filter((modelId) => selected.includes(modelId))
+  const explicitThinkingCandidates = normalizeModelIds(
+    selected.filter((modelId) => isLikelyThinkingModelId(modelId))
   );
+
+  const hasSavedThinkingSelection =
+    options && typeof options === "object" && options.hasSavedThinkingSelection === true;
+  if (!hasSavedThinkingSelection) {
+    return explicitThinkingCandidates;
+  }
+
+  const selectedSet = new Set(selected);
   return normalizeModelIds(
-    selected.filter((modelId) => currentSet.has(modelId) || isLikelyThinkingModelId(modelId))
+    normalizeModelIds(existingThinkingModels).filter((modelId) => selectedSet.has(modelId))
   );
 }
 
@@ -267,10 +322,12 @@ module.exports = {
   getConnectedProvidersWithStatus,
   getProvidersWithStatus,
   promptModelSelection,
+  promptThinkingModelModes,
   promptThinkingModelSelection,
   promptProviderModelsSelection,
   promptProviderSelection,
   readDroidSyncedModelIdsByProvider,
   readDroidSyncedModelsByProvider,
+  resolveThinkingModelModes,
   resolveThinkingModels,
 };
