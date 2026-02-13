@@ -7,7 +7,7 @@ const syncModule = require("../sync");
 const menuModule = require("../ui/menu");
 const outputModule = require("../ui/output");
 const { Spinner } = require("../ui/spinner");
-const { HOME_ACTIONS, normalizeModelIds, normalizeText } = require("./interactiveHelpers");
+const { buildVisibleHomeActions, normalizeModelIds, normalizeText } = require("./interactiveHelpers");
 
 function createInteractiveApi(overrides = {}) {
   const config = overrides.config || configModule;
@@ -22,27 +22,70 @@ function createInteractiveApi(overrides = {}) {
     (() => Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY));
   const createSpinner = overrides.createSpinner || ((text) => new Spinner(text));
 
-  function homeTitle() {
-    const state = config.readState() || {};
-    const selectedProvider = normalizeText(state.selectedProvider) || "not selected";
-    const selectedModels = normalizeModelIds(state.selectedModels);
+  function homeTitle(context) {
+    const selectedProvider = normalizeText(context.selectedProvider) || "not selected";
+    const selectedModelsCount = Number(context.selectedModelsCount) || 0;
+    const proxyState = context.proxyBlocked
+      ? "blocked"
+      : context.proxyRunning
+        ? "running"
+        : "stopped";
+    const configState = context.configExists ? "loaded" : "missing";
     return [
       output.accent("Droxy Interactive"),
-      output.dim("Manual setup flow with explicit provider/model selection."),
+      output.dim("Manual setup flow with explicit provider/model selection"),
+      output.dim(`Config: ${configState} | Proxy: ${proxyState}`),
       output.dim(`Provider: ${selectedProvider}`),
-      output.dim(`Selected models: ${selectedModels.length}`),
+      output.dim(`Selected models: ${selectedModelsCount}`),
     ].join("\n");
   }
 
-  async function promptHomeAction() {
+  async function promptHomeAction(context) {
+    const actions = buildVisibleHomeActions(context);
     const selection = await menu.selectSingle({
-      title: homeTitle(),
-      items: HOME_ACTIONS.map((item) => item.label),
+      title: homeTitle(context),
+      items: actions.map((item) => item.label),
       hint: "Use ↑/↓ and Enter. Press q to exit.",
     });
     if (!selection || selection.cancelled) return "exit";
-    const action = HOME_ACTIONS[selection.index];
+    const action = actions[selection.index];
     return action ? action.id : "exit";
+  }
+
+  async function getMenuContext() {
+    const state = config.readState() || {};
+    const selectedModels = normalizeModelIds(state.selectedModels);
+    const context = {
+      configExists:
+        typeof config.configExists === "function" ? config.configExists() : true,
+      proxyBlocked: false,
+      proxyRunning: false,
+      selectedModelsCount: selectedModels.length,
+      selectedProvider: normalizeText(state.selectedProvider) || "",
+    };
+
+    if (!context.configExists) {
+      return context;
+    }
+
+    if (
+      typeof config.readConfigValues !== "function" ||
+      typeof proxy.getProxyStatus !== "function"
+    ) {
+      return context;
+    }
+
+    try {
+      const values = config.readConfigValues();
+      if (!values || !values.host || !values.port) return context;
+      const status = await proxy.getProxyStatus(values.host, values.port);
+      context.proxyRunning = Boolean(status && status.running);
+      context.proxyBlocked = Boolean(status && status.blocked);
+    } catch {
+      // Keep default proxy state when status lookup fails.
+    }
+
+    return context;
   }
 
   async function promptProviderSelection() {
@@ -264,7 +307,8 @@ function createInteractiveApi(overrides = {}) {
 
     let exitRequested = false;
     while (!exitRequested) {
-      const action = await promptHomeAction();
+      const context = await getMenuContext();
+      const action = await promptHomeAction(context);
 
       if (action === "connect_provider") {
         await connectProviderFlow();

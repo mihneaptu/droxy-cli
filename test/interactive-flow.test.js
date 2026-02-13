@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const { createInteractiveApi } = require("../src/flows/interactive");
+const { buildVisibleHomeActions } = require("../src/flows/interactiveHelpers");
 
 function createSpinnerStub() {
   return {
@@ -116,4 +117,31 @@ test("interactive mode reports non-interactive sessions", async () => {
   assert.equal(result.reason, "non_interactive");
   assert.equal(outputCalls.length, 1);
   assert.match(String(outputCalls[0].what), /TTY/);
+});
+
+test("buildVisibleHomeActions hides stop when proxy is not running", () => {
+  const actions = buildVisibleHomeActions({
+    configExists: true,
+    proxyBlocked: false,
+    proxyRunning: false,
+    selectedModelsCount: 0,
+  });
+  const labels = actions.map((item) => item.label);
+  assert.equal(labels.includes("Start Proxy"), true);
+  assert.equal(labels.includes("Stop Proxy"), false);
+  assert.equal(labels.includes("Sync to Droid"), false);
+});
+
+test("buildVisibleHomeActions shows stop+sync when proxy runs with selected models", () => {
+  const actions = buildVisibleHomeActions({
+    configExists: true,
+    proxyBlocked: false,
+    proxyRunning: true,
+    selectedModelsCount: 2,
+  });
+  const labels = actions.map((item) => item.label);
+  assert.equal(labels.includes("Start Proxy"), false);
+  assert.equal(labels.includes("Stop Proxy"), true);
+  assert.equal(labels.includes("Choose Models"), true);
+  assert.equal(labels.includes("Sync to Droid"), true);
 });
