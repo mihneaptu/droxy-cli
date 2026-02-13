@@ -783,7 +783,7 @@ function createSyncApi(overrides = {}) {
     const normalized = normalizeModelId(value);
     if (!normalized) return false;
     if (normalized.length > 200) return false;
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(normalized)) return false;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(normalized)) return false;
     return /[A-Za-z]/.test(normalized);
   }
 
@@ -1031,7 +1031,11 @@ function createSyncApi(overrides = {}) {
         managementKey,
       });
       if (oauthExcluded.length) return oauthExcluded;
+    } catch {
+      // Ignore oauth exclusion endpoint errors and continue to auth-files fallback.
+    }
 
+    try {
       return await fetchAuthFilesModelExclusions({
         configValues,
         protocol,

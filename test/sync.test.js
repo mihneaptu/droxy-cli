@@ -366,6 +366,40 @@ test("fetchAvailableModelEntries excludes models from oauth-excluded-models mana
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
 });
 
+test("fetchAvailableModelEntries excludes slash-delimited model IDs from oauth-excluded-models endpoint", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "openai/gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: {
+          "oauth-excluded-models": {
+            openai: ["openai/gpt-5"],
+          },
+        },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5.3-codex-spark"]);
+});
+
 test("fetchAvailableModelEntries falls back to auth-files exclusion when oauth-excluded-models is empty", async () => {
   const api = sync.createSyncApi({
     http: createRouteRequestMock({
@@ -388,6 +422,48 @@ test("fetchAvailableModelEntries falls back to auth-files exclusion when oauth-e
           files: [
             {
               provider: "codex",
+              status_message:
+                "{\"detail\":\"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.\"}",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchAvailableModelEntries falls back to auth-files exclusion when oauth-excluded-models errors", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 500,
+        body: { error: "proxy unavailable" },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
               status_message:
                 "{\"detail\":\"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.\"}",
             },
