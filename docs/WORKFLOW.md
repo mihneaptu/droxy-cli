@@ -36,6 +36,7 @@ This workflow is optimized for a solo developer with limited experience.
 - Run full test suite: `npm test`.
 - Run manual smoke checks:
   - `node droxy.js --help`
+  - `node droxy.js` (interactive home in TTY)
   - `node droxy.js status --json`
   - `node droxy.js login <provider>`
   - `node droxy.js droid sync --quiet`

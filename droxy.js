@@ -2,6 +2,7 @@
 "use strict";
 
 const pkg = require("./package.json");
+const interactiveModule = require("./src/flows/interactive");
 const loginModule = require("./src/login");
 const proxyModule = require("./src/proxy");
 const syncModule = require("./src/sync");
@@ -16,6 +17,7 @@ const KNOWN_COMMANDS = [
   "status",
   "login",
   "connect",
+  "ui",
   "droid",
   "help",
   "version",
@@ -194,6 +196,8 @@ function printHelp(output = outputModule) {
     "Droxy CLI v0.1.0",
     "",
     "Usage:",
+    "  droxy",
+    "  droxy ui",
     "  droxy start [--quiet]",
     "  droxy stop [--force] [--quiet]",
     "  droxy status [--check] [--json] [--verbose] [--quiet]",
@@ -232,14 +236,31 @@ function printGuided(output, payload) {
   }
 }
 
+function isInteractiveSession(options = {}) {
+  if (typeof options.isInteractiveSession === "function") {
+    return options.isInteractiveSession();
+  }
+  return Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY);
+}
+
 async function runCli(argv = process.argv.slice(2), options = {}) {
+  const interactive = options.interactive || interactiveModule;
   const proxy = options.proxy || proxyModule;
   const login = options.login || loginModule;
   const sync = options.sync || syncModule;
   const output = options.output || outputModule;
   const version = options.version || pkg.version || "0.1.0";
+  const rawArgs = Array.isArray(argv) ? argv.slice() : [];
 
-  const parsed = parseArgs(argv);
+  if (rawArgs.length === 0) {
+    if (isInteractiveSession(options)) {
+      return interactive.runInteractiveHome();
+    }
+    printHelp(output);
+    return undefined;
+  }
+
+  const parsed = parseArgs(rawArgs);
 
   if (HELP_ALIASES.has(parsed.command)) {
     printHelp(output);
@@ -280,6 +301,19 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
       selectModels,
       quiet: parsed.hasFlag("--quiet"),
     });
+  }
+
+  if (parsed.command === "ui") {
+    if (isInteractiveSession(options)) {
+      return interactive.runInteractiveHome();
+    }
+    printGuided(output, {
+      what: "Interactive mode requires a TTY terminal.",
+      why: "No interactive stdin/stdout is available in this session.",
+      next: ["Run: droxy help"],
+    });
+    process.exitCode = 1;
+    return undefined;
   }
 
   if (parsed.command === "droid") {
@@ -358,6 +392,7 @@ function handleCliError(err, { exitOnError = true } = {}) {
 
 module.exports = {
   handleCliError,
+  isInteractiveSession,
   parseArgs,
   printHelp,
   runCli,

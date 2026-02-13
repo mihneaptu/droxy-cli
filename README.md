@@ -10,6 +10,8 @@ Minimal Droxy CLI MVP focused on proxy lifecycle, login, and Droid sync.
 ## Usage
 
 ```bash
+droxy
+droxy ui
 droxy start [--quiet]
 droxy stop [--force] [--quiet]
 droxy status [--check] [--json] [--verbose] [--quiet]
@@ -19,6 +21,12 @@ droxy droid sync [--quiet]
 droxy help
 droxy version
 ```
+
+`droxy` (no args) opens interactive manual setup mode:
+
+1. Connect provider
+2. Choose models
+3. Sync selected models to Droid
 
 Providers:
 

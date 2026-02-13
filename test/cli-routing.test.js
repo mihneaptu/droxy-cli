@@ -26,6 +26,10 @@ function createDeps() {
       sync: {
         syncDroidSettings: async (opts) => calls.push(["syncDroidSettings", opts]),
       },
+      interactive: {
+        runInteractiveHome: async () => calls.push(["runInteractiveHome"]),
+      },
+      isInteractiveSession: () => true,
     },
   };
 }
@@ -67,6 +71,23 @@ test("routes droid sync", async () => {
   const target = createDeps();
   await runCli(["droid", "sync", "--quiet"], target.deps);
   assert.deepEqual(target.calls, [["syncDroidSettings", { quiet: true }]]);
+});
+
+test("routes no-arg and ui command to interactive home", async () => {
+  const first = createDeps();
+  await runCli([], first.deps);
+  assert.deepEqual(first.calls, [["runInteractiveHome"]]);
+
+  const second = createDeps();
+  await runCli(["ui"], second.deps);
+  assert.deepEqual(second.calls, [["runInteractiveHome"]]);
+});
+
+test("prints help for no-arg in non-interactive sessions", async () => {
+  const target = createDeps();
+  target.deps.isInteractiveSession = () => false;
+  await runCli([], target.deps);
+  assert.equal(target.calls.some((entry) => entry[0] === "log" && /Droxy CLI/.test(entry[1])), true);
 });
 
 test("help and version aliases log expected output", async () => {

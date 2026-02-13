@@ -158,3 +158,26 @@ test("splitModelsForFactoryEntries classifies providers", () => {
   assert.deepEqual(split.openai, ["gpt-5"]);
   assert.deepEqual(split.anthropic, ["claude-opus", "claude-sonnet"]);
 });
+
+test("filterDetectedEntriesBySelection keeps only explicitly selected models", () => {
+  const result = sync.filterDetectedEntriesBySelection(
+    [
+      { id: "gpt-5", provider: "openai" },
+      { id: "claude-opus", provider: "anthropic" },
+      { id: "claude-sonnet", provider: "anthropic" },
+    ],
+    ["claude-opus", "missing-model"]
+  );
+
+  assert.deepEqual(result.selectedIds, ["claude-opus", "missing-model"]);
+  assert.equal(result.skippedCount, 1);
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["claude-opus"]);
+});
+
+test("filterDetectedEntriesBySelection is a no-op when no selection is provided", () => {
+  const entries = [{ id: "gpt-5" }, { id: "claude-opus" }];
+  const result = sync.filterDetectedEntriesBySelection(entries, []);
+  assert.deepEqual(result.entries, entries);
+  assert.deepEqual(result.selectedIds, []);
+  assert.equal(result.skippedCount, 0);
+});

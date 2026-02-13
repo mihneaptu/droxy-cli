@@ -126,6 +126,44 @@ function createSyncApi(overrides = {}) {
     return { openai, anthropic };
   }
 
+  function normalizeSelectedModelIds(selectedModels) {
+    const seen = new Set();
+    const output = [];
+    for (const item of Array.isArray(selectedModels) ? selectedModels : []) {
+      const value = String(item || "").trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      output.push(value);
+    }
+    output.sort((left, right) => left.localeCompare(right));
+    return output;
+  }
+
+  function filterDetectedEntriesBySelection(entries, selectedModels) {
+    const selectedIds = normalizeSelectedModelIds(selectedModels);
+    if (!selectedIds.length) {
+      return {
+        entries: Array.isArray(entries) ? entries : [],
+        selectedIds,
+        skippedCount: 0,
+      };
+    }
+
+    const selectedSet = new Set(selectedIds);
+    const nextEntries = [];
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const id = entry && entry.id ? String(entry.id) : "";
+      if (!id || !selectedSet.has(id)) continue;
+      nextEntries.push(entry);
+    }
+
+    return {
+      entries: nextEntries,
+      selectedIds,
+      skippedCount: Math.max(0, selectedIds.length - nextEntries.length),
+    };
+  }
+
   function normalizeUrl(url) {
     return helpers.normalizeUrl(url);
   }
@@ -669,7 +707,7 @@ function createSyncApi(overrides = {}) {
     return "Sync finished.";
   }
 
-  async function syncDroidSettings({ quiet = false } = {}) {
+  async function syncDroidSettings({ quiet = false, selectedModels } = {}) {
     if (!config.configExists()) {
       if (!quiet) {
         output.printGuidedError({
@@ -736,6 +774,27 @@ function createSyncApi(overrides = {}) {
       return { success: false, reason: "detect_failed", result };
     }
 
+    const filtered = filterDetectedEntriesBySelection(detectedEntries, selectedModels);
+    if (filtered.selectedIds.length && !filtered.entries.length) {
+      if (!quiet) {
+        output.printGuidedError({
+          what: "Selected models were not found in current proxy model list.",
+          why: "The model catalog changed or selected model IDs are stale.",
+          next: [
+            "Run: droxy status --verbose",
+            "Re-select models in interactive mode",
+            "Retry: droxy droid sync",
+          ],
+        });
+      }
+      return {
+        success: false,
+        reason: "selected_models_not_found",
+        selectedModels: filtered.selectedIds,
+      };
+    }
+
+    detectedEntries = filtered.entries;
     const split = splitModelsForFactoryEntries(detectedEntries);
 
     let result;
@@ -763,6 +822,7 @@ function createSyncApi(overrides = {}) {
 
     config.updateState({
       lastFactorySyncAt: new Date().toISOString(),
+      ...(filtered.selectedIds.length ? { selectedModels: filtered.selectedIds } : {}),
       factory: {
         enabled: true,
         autoDetect: true,
@@ -777,7 +837,15 @@ function createSyncApi(overrides = {}) {
       output.printSuccess(describeSyncResult(result));
     }
 
-    return { success: true, result };
+    return {
+      success: true,
+      result: {
+        ...result,
+        ...(filtered.selectedIds.length
+          ? { selectedModels: filtered.selectedIds, selectedModelsSkipped: filtered.skippedCount }
+          : {}),
+      },
+    };
   }
 
   return {
@@ -788,8 +856,10 @@ function createSyncApi(overrides = {}) {
     describeSyncResult,
     fetchAvailableModelEntries,
     fetchAvailableModelEntriesSafe,
+    filterDetectedEntriesBySelection,
     getDroidManagedPaths,
     isDroxyManagedEntry,
+    normalizeSelectedModelIds,
     resolveReachableProtocol,
     splitModelsForFactoryEntries,
     syncDroidSettings,
