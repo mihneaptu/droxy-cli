@@ -39,7 +39,7 @@ This workflow is optimized for a solo developer with limited experience.
   - `node droxy.js` (interactive home in TTY)
   - `node droxy.js status --json`
   - `node droxy.js login <provider>`
-  - `node droxy.js droid sync --quiet`
+  - verify model auto-sync after `Choose Models` in interactive mode
 - Verify non-TTY behavior and error paths.
 
 ### Friday (Ship)

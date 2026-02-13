@@ -17,7 +17,6 @@ droxy stop [--force] [--quiet]
 droxy status [--check] [--json] [--verbose] [--quiet]
 droxy login [provider] [--with-models|--skip-models]
 droxy connect [provider] [--with-models|--skip-models]
-droxy droid sync [--quiet]
 droxy help
 droxy version
 ```
@@ -25,8 +24,12 @@ droxy version
 `droxy` (no args) opens interactive manual setup mode:
 
 1. Connect provider
-2. Choose models
-3. Sync selected models to Droid
+   - Shows which providers are already connected
+2. Choose provider, then choose models
+   - Model picker shows connected providers only and selected counts per provider
+   - Includes a separate thinking-models menu for selected models
+   - Auto-syncs selected models to Droid (including clearing stale Droid models when selection is empty)
+3. Droxy continuously self-checks selected-model drift and auto-syncs Droid whenever proxy is running
 
 Providers:
 

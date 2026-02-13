@@ -18,7 +18,6 @@ const KNOWN_COMMANDS = [
   "login",
   "connect",
   "ui",
-  "droid",
   "help",
   "version",
 ];
@@ -203,9 +202,12 @@ function printHelp(output = outputModule) {
     "  droxy status [--check] [--json] [--verbose] [--quiet]",
     "  droxy login [provider] [--with-models|--skip-models]",
     "  droxy connect [provider] [--with-models|--skip-models]",
-    "  droxy droid sync [--quiet]",
     "  droxy help",
     "  droxy version",
+    "",
+  "Flags:",
+    "  --with-models   Legacy alias; model auto-sync is enabled by default",
+    "  --skip-models   Login only, skip automatic model sync",
     "",
     "Providers:",
     "  gemini, codex, claude, qwen, kimi, iflow, antigravity",
@@ -294,13 +296,27 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
 
   if (parsed.command === "login" || parsed.command === "connect") {
     const skipModels = parsed.hasFlag("--skip-models");
-    const withModels = parsed.hasFlag("--with-models");
-    const selectModels = withModels ? true : skipModels ? false : undefined;
-    return login.loginFlow({
+    const selectModels = skipModels ? false : true;
+    const quiet = parsed.hasFlag("--quiet");
+    const loginResult = await login.loginFlow({
       providerId: parsed.subcommand,
       selectModels,
-      quiet: parsed.hasFlag("--quiet"),
+      quiet,
     });
+    if (loginResult && loginResult.success === false) {
+      return loginResult;
+    }
+    if (skipModels) {
+      return loginResult;
+    }
+    if (!quiet && output && typeof output.printInfo === "function") {
+      output.printInfo("Auto-syncing detected models to Droid...");
+    }
+    const syncResult = await sync.syncDroidSettings({ quiet });
+    if (loginResult && typeof loginResult === "object") {
+      return { ...loginResult, syncResult };
+    }
+    return syncResult;
   }
 
   if (parsed.command === "ui") {
@@ -313,18 +329,6 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
       next: ["Run: droxy help"],
     });
     process.exitCode = 1;
-    return undefined;
-  }
-
-  if (parsed.command === "droid") {
-    if (parsed.subcommand === "sync") {
-      return sync.syncDroidSettings({ quiet: parsed.hasFlag("--quiet") });
-    }
-    printGuided(output, {
-      what: "Unsupported droid subcommand.",
-      why: `Received: ${parsed.subcommandToken || "(empty)"}`,
-      next: ["Use: droxy droid sync [--quiet]"],
-    });
     return undefined;
   }
 

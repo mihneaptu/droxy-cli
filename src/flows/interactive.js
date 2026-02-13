@@ -1,5 +1,4 @@
 "use strict";
-
 const configModule = require("../config");
 const loginModule = require("../login");
 const proxyModule = require("../proxy");
@@ -7,8 +6,24 @@ const syncModule = require("../sync");
 const menuModule = require("../ui/menu");
 const outputModule = require("../ui/output");
 const { Spinner } = require("../ui/spinner");
-const { buildVisibleHomeActions, normalizeModelIds, normalizeText } = require("./interactiveHelpers");
-
+const { autoSyncSelectedModelsIfDrifted } = require("./interactiveAutoSync");
+const { getMenuContext, promptHomeAction } = require("./interactiveHome");
+const {
+  fetchModelEntriesForSelection,
+  getConnectedProvidersWithStatus,
+  getProvidersWithStatus,
+  promptModelSelection,
+  promptThinkingModelSelection,
+  promptProviderModelsSelection,
+  promptProviderSelection,
+  readDroidSyncedModelIdsByProvider,
+  resolveThinkingModels,
+} = require("./interactiveSelection");
+const {
+  buildProviderModelGroups,
+  mergeProviderModelSelection,
+  normalizeModelIds,
+} = require("./interactiveHelpers");
 function createInteractiveApi(overrides = {}) {
   const config = overrides.config || configModule;
   const login = overrides.login || loginModule;
@@ -17,161 +32,60 @@ function createInteractiveApi(overrides = {}) {
   const menu = overrides.menu || menuModule;
   const output = overrides.output || outputModule;
   const now = overrides.now || (() => new Date().toISOString());
+  const readDroidSyncedModelIdsByProviderFn =
+    overrides.readDroidSyncedModelIdsByProvider || readDroidSyncedModelIdsByProvider;
+  const canReadDroidSyncState =
+    typeof overrides.readDroidSyncedModelIdsByProvider === "function" ||
+    Boolean(sync && typeof sync.getDroidManagedPaths === "function");
+  const readDroidSyncedByProvider = () => readDroidSyncedModelIdsByProviderFn({ config, sync });
   const isInteractiveSession =
     overrides.isInteractiveSession ||
     (() => Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY));
   const createSpinner = overrides.createSpinner || ((text) => new Spinner(text));
-
-  function homeTitle(context) {
-    const selectedProvider = normalizeText(context.selectedProvider) || "not selected";
-    const selectedModelsCount = Number(context.selectedModelsCount) || 0;
-    const proxyState = context.proxyBlocked
-      ? "blocked"
-      : context.proxyRunning
-        ? "running"
-        : "stopped";
-    const configState = context.configExists ? "loaded" : "missing";
-    return [
-      output.accent("Droxy Interactive"),
-      output.dim("Manual setup flow with explicit provider/model selection"),
-      output.dim(`Config: ${configState} | Proxy: ${proxyState}`),
-      output.dim(`Provider: ${selectedProvider}`),
-      output.dim(`Selected models: ${selectedModelsCount}`),
-    ].join("\n");
-  }
-
-  async function promptHomeAction(context) {
-    const actions = buildVisibleHomeActions(context);
-    const selection = await menu.selectSingle({
-      title: homeTitle(context),
-      items: actions.map((item) => item.label),
-      hint: "Use ↑/↓ and Enter. Press q to exit.",
-    });
-    if (!selection || selection.cancelled) return "exit";
-    const action = actions[selection.index];
-    return action ? action.id : "exit";
-  }
-
-  async function getMenuContext() {
-    const state = config.readState() || {};
-    const selectedModels = normalizeModelIds(state.selectedModels);
-    const context = {
-      configExists:
-        typeof config.configExists === "function" ? config.configExists() : true,
-      proxyBlocked: false,
-      proxyRunning: false,
-      selectedModelsCount: selectedModels.length,
-      selectedProvider: normalizeText(state.selectedProvider) || "",
-    };
-
-    if (!context.configExists) {
-      return context;
-    }
-
-    if (
-      typeof config.readConfigValues !== "function" ||
-      typeof proxy.getProxyStatus !== "function"
-    ) {
-      return context;
-    }
-
-    try {
-      const values = config.readConfigValues();
-      if (!values || !values.host || !values.port) return context;
-      const status = await proxy.getProxyStatus(values.host, values.port);
-      context.proxyRunning = Boolean(status && status.running);
-      context.proxyBlocked = Boolean(status && status.blocked);
-    } catch {
-      // Keep default proxy state when status lookup fails.
-    }
-
-    return context;
-  }
-
-  async function promptProviderSelection() {
-    const providers = Array.isArray(login.PROVIDERS) ? login.PROVIDERS : [];
-    if (!providers.length) return null;
-
-    const selection = await menu.selectSingle({
-      title: "Choose provider",
-      items: providers.map((provider) => `${provider.label} (${provider.id})`),
-      hint: "Use ↑/↓ and Enter. Press q to cancel.",
-    });
-
-    if (!selection || selection.cancelled) return null;
-    return providers[selection.index] || null;
-  }
-
   async function connectProviderFlow() {
     config.ensureConfig();
-    const provider = await promptProviderSelection();
+    const configValues = config.readConfigValues();
+    const providers = getProvidersWithStatus(login, configValues);
+    const provider = await promptProviderSelection(menu, providers);
     if (!provider) {
       output.printInfo("Provider selection cancelled.");
       return { success: false, reason: "cancelled" };
     }
-
+    if (provider.connected) {
+      output.printInfo("Provider already connected. Continuing will refresh login.");
+    }
     const result = await login.loginFlow({
       providerId: provider.id,
       quiet: false,
     });
-
     if (result && result.success === false) {
       return result;
     }
-
     config.updateState({
       selectedProvider: provider.id,
       lastInteractiveActionAt: now(),
     });
-
     output.printSuccess(`Provider selected: ${provider.id}`);
     return { success: true, provider: provider.id };
   }
-
-  async function fetchModelIdsForSelection() {
-    config.ensureConfig();
-    const values = config.readConfigValues();
-    const status = await proxy.getProxyStatus(values.host, values.port);
-    if (status.blocked) {
-      throw new Error("Configured proxy port is blocked by a non-Droxy process.");
-    }
-    if (!status.running) {
-      throw new Error("Droxy proxy is not running.");
-    }
-
-    const state = config.readState() || {};
-    const apiKey = values.apiKey || state.apiKey || "";
-    const protocolResolution = await sync.resolveReachableProtocol(values, {
-      probePath: "/v1/models",
-    });
-
-    if (!protocolResolution.reachable) {
-      throw sync.buildProtocolUnavailableError(protocolResolution);
-    }
-
-    const entries = await sync.fetchAvailableModelEntries(
-      { ...values, apiKey },
-      { protocolResolution }
-    );
-
-    return normalizeModelIds(entries.map((entry) => (entry && entry.id ? String(entry.id) : "")));
-  }
-
-  async function promptModelSelection(models, initialSelected) {
-    return menu.selectMultiple({
-      title: "Choose models",
-      items: models,
-      initialSelected: normalizeModelIds(initialSelected),
-      hint: "↑/↓ move  space toggle  a all  n none  enter confirm  q cancel",
-    });
-  }
-
   async function chooseModelsFlow() {
     const spinner = createSpinner("Fetching available models...").start();
-    let models = [];
+    let modelEntries = [];
+    let detectedProtocol = null;
     try {
-      models = await fetchModelIdsForSelection();
-      spinner.succeed(`Loaded ${models.length} model${models.length === 1 ? "" : "s"}.`);
+      const fetchResult = await fetchModelEntriesForSelection({ config, proxy, sync });
+      if (Array.isArray(fetchResult)) {
+        modelEntries = fetchResult;
+      } else {
+        modelEntries = Array.isArray(fetchResult && fetchResult.entries)
+          ? fetchResult.entries
+          : [];
+        detectedProtocol =
+          fetchResult && typeof fetchResult.protocol === "string" && fetchResult.protocol
+            ? fetchResult.protocol
+            : null;
+      }
+      spinner.succeed(`Loaded ${modelEntries.length} model${modelEntries.length === 1 ? "" : "s"}.`);
     } catch (err) {
       spinner.fail("Model fetch failed.");
       const message = err && err.message ? err.message : String(err || "Unknown error");
@@ -187,44 +101,145 @@ function createInteractiveApi(overrides = {}) {
       return { success: false, reason: "model_fetch_failed" };
     }
 
-    if (!models.length) {
+    if (!modelEntries.length) {
       output.printWarning("No models detected from your current proxy session.");
       return { success: false, reason: "no_models" };
     }
 
-    const state = config.readState() || {};
-    const selection = await promptModelSelection(models, state.selectedModels || []);
-    if (!selection || selection.cancelled) {
-      output.printInfo("Model selection cancelled.");
-      return { success: false, reason: "cancelled" };
+    const values = config.readConfigValues();
+    const providerGroups = buildProviderModelGroups(
+      modelEntries,
+      getConnectedProvidersWithStatus(login, values)
+    );
+    const syncedModelIdsByProvider = readDroidSyncedModelIdsByProviderFn({ config, sync });
+    const syncedByProvider = Object.fromEntries(
+      Object.entries(syncedModelIdsByProvider).map(([providerId, ids]) => [
+        providerId,
+        normalizeModelIds(ids).length,
+      ])
+    );
+    if (!providerGroups.length) {
+      output.printGuidedError({
+        what: "No connected providers with detected models.",
+        why: "Model picker only shows providers that are currently connected.",
+        next: [
+          "Use menu action: Connect Provider",
+          "Then retry: Choose Models",
+        ],
+      });
+      return { success: false, reason: "no_connected_provider_models" };
     }
 
-    const selectedModels = normalizeModelIds(selection.selected);
-    if (!selectedModels.length) {
-      output.printWarning("No models selected. Selection was not changed.");
-      return { success: false, reason: "empty_selection" };
+    let selectedForProvider = [];
+    let selectedModels = [];
+    let providerGroup = null;
+    let existingSelectedModels = [];
+
+    while (true) {
+      const state = config.readState() || {};
+      existingSelectedModels = normalizeModelIds(state.selectedModels || []);
+
+      providerGroup = await promptProviderModelsSelection(
+        menu,
+        providerGroups,
+        { syncedByProvider }
+      );
+      if (!providerGroup) {
+        output.printInfo("Provider selection cancelled.");
+        return { success: false, reason: "cancelled" };
+      }
+
+      const initialSelectedForProvider = normalizeModelIds(
+        (Array.isArray(syncedModelIdsByProvider[providerGroup.id])
+          ? syncedModelIdsByProvider[providerGroup.id]
+          : []
+        ).filter((modelId) => providerGroup.models.includes(modelId))
+      );
+      const selection = await promptModelSelection(
+        menu,
+        providerGroup.models,
+        initialSelectedForProvider,
+        providerGroup.label
+      );
+      if (!selection || selection.cancelled) {
+        output.printInfo("Model selection cancelled. Returning to provider list.");
+        continue;
+      }
+
+      selectedForProvider = normalizeModelIds(selection.selected);
+      selectedModels = mergeProviderModelSelection(
+        existingSelectedModels,
+        providerGroup.models,
+        selectedForProvider
+      );
+      break;
     }
+
+    const currentState = config.readState() || {};
+    const existingThinkingModels = normalizeModelIds(currentState.thinkingModels || []).filter((modelId) =>
+      selectedModels.includes(modelId)
+    );
+    const initialThinkingModels = resolveThinkingModels(
+      selectedModels,
+      existingThinkingModels
+    );
+    const thinkingSelection = await promptThinkingModelSelection(
+      menu,
+      selectedModels,
+      initialThinkingModels
+    );
+    const thinkingModels =
+      thinkingSelection && !thinkingSelection.cancelled
+        ? normalizeModelIds(thinkingSelection.selected)
+        : existingThinkingModels;
 
     config.updateState({
       selectedModels,
+      thinkingModels,
       lastInteractiveActionAt: now(),
     });
 
-    output.printSuccess(`Saved ${selectedModels.length} selected model${selectedModels.length === 1 ? "" : "s"}.`);
-    output.printNextStep("Use menu action `Sync to Droid`.");
-    return { success: true, selectedModels };
-  }
+    if (selectedForProvider.length) {
+      output.printSuccess(
+        `Saved ${selectedForProvider.length} selected model${selectedForProvider.length === 1 ? "" : "s"} for ${providerGroup.label}.`
+      );
+    } else {
+      output.printSuccess(`Cleared selected models for ${providerGroup.label}.`);
+    }
+    output.printSuccess(
+      `Thinking enabled for ${thinkingModels.length} selected model${thinkingModels.length === 1 ? "" : "s"}.`
+    );
 
-  async function syncSelectedModelsFlow() {
-    const state = config.readState() || {};
-    const selectedModels = normalizeModelIds(state.selectedModels);
     if (!selectedModels.length) {
+      output.printInfo("No models selected overall. Clearing Droxy-managed models in Droid.");
+    }
+
+    const syncResult = await syncSelectedModelsFlow({
+      allowEmptySelection: true,
+      selectedModels,
+      detectedEntries: modelEntries,
+      protocol: detectedProtocol,
+    });
+    if (syncResult && syncResult.success) {
+      return { success: true, selectedModels, synced: true };
+    }
+
+    output.printNextStep("Droxy will auto-retry Droid sync when proxy/model state is ready.");
+    return { success: true, selectedModels, synced: false, syncResult };
+  }
+  async function syncSelectedModelsFlow(options = {}) {
+    const state = config.readState() || {};
+    const allowEmptySelection = options.allowEmptySelection === true;
+    const selectedModels = normalizeModelIds(
+      Array.isArray(options.selectedModels) ? options.selectedModels : state.selectedModels
+    );
+    if (!selectedModels.length && !allowEmptySelection) {
       output.printGuidedError({
         what: "No models selected yet.",
-        why: "Manual mode syncs only models you explicitly selected.",
+        why: "Droxy auto-syncs only models you explicitly selected.",
         next: [
           "Use menu action: Choose Models",
-          "Then use menu action: Sync to Droid",
+          "Droxy will sync automatically",
         ],
       });
       return { success: false, reason: "no_selected_models" };
@@ -233,18 +248,28 @@ function createInteractiveApi(overrides = {}) {
     const spinner = createSpinner("Syncing selected models to Droid...").start();
     let result;
     try {
-      result = await sync.syncDroidSettings({ quiet: true, selectedModels });
+      result = await sync.syncDroidSettings({
+        quiet: true,
+        selectedModels,
+        detectedEntries: Array.isArray(options.detectedEntries) ? options.detectedEntries : undefined,
+        protocol: options.protocol || undefined,
+      });
     } catch (err) {
       spinner.fail("Sync failed.");
       output.printGuidedError({
         what: "Droid sync failed.",
         why: err && err.message ? err.message : String(err || "Unknown sync error."),
-        next: ["Run: droxy status --verbose", "Retry menu action: Sync to Droid"],
+        next: ["Run: droxy status --verbose", "Droxy will auto-retry sync when ready"],
       });
       return { success: false, reason: "sync_failed" };
     }
 
     if (result && result.success) {
+      if (result.result && result.result.status === "cleared") {
+        spinner.succeed("Cleared Droxy-managed models in Droid.");
+        config.updateState({ lastInteractiveActionAt: now() });
+        return result;
+      }
       const count =
         result.result && Number.isFinite(result.result.modelsAdded)
           ? result.result.modelsAdded
@@ -259,42 +284,37 @@ function createInteractiveApi(overrides = {}) {
       output.printGuidedError({
         what: "Selected models were not found in current proxy results.",
         why: "Your provider/model catalog changed since last selection.",
-        next: ["Use menu action: Choose Models", "Then retry: Sync to Droid"],
+        next: ["Use menu action: Choose Models", "Droxy will auto-sync after selection"],
       });
     } else if (result && result.reason === "proxy_unreachable") {
       output.printGuidedError({
         what: "Proxy is unreachable for model sync.",
         why: "Droxy could not query /v1/models on your configured host/port.",
-        next: ["Use menu action: Start Proxy", "Then retry: Sync to Droid"],
+        next: ["Use menu action: Start Proxy", "Droxy auto-sync resumes once proxy is running"],
       });
     } else {
       output.printGuidedError({
         what: "Sync could not be completed.",
         why: "Droxy did not receive a successful sync result.",
-        next: ["Run: droxy status --verbose", "Retry menu action: Sync to Droid"],
+        next: ["Run: droxy status --verbose", "Droxy auto-sync will retry"],
       });
     }
     return result || { success: false, reason: "sync_failed" };
   }
-
+  async function runAndStamp(action) {
+    const result = await action();
+    config.updateState({ lastInteractiveActionAt: now() });
+    return result;
+  }
   async function statusFlow() {
-    const result = await proxy.statusProxy({ check: false, json: false, verbose: true, quiet: false });
-    config.updateState({ lastInteractiveActionAt: now() });
-    return result;
+    return runAndStamp(() => proxy.statusProxy({ check: false, json: false, verbose: true, quiet: false }));
   }
-
   async function startProxyFlow() {
-    const result = await proxy.startProxy({ allowAttach: true, quiet: false });
-    config.updateState({ lastInteractiveActionAt: now() });
-    return result;
+    return runAndStamp(() => proxy.startProxy({ allowAttach: true, quiet: false }));
   }
-
   async function stopProxyFlow() {
-    const result = await proxy.stopProxy({ force: false, quiet: false });
-    config.updateState({ lastInteractiveActionAt: now() });
-    return result;
+    return runAndStamp(() => proxy.stopProxy({ force: false, quiet: false }));
   }
-
   async function runInteractiveHome() {
     if (!isInteractiveSession()) {
       output.printGuidedError({
@@ -304,18 +324,19 @@ function createInteractiveApi(overrides = {}) {
       });
       return { success: false, reason: "non_interactive" };
     }
-
     let exitRequested = false;
     while (!exitRequested) {
-      const context = await getMenuContext();
-      const action = await promptHomeAction(context);
-
+      const context = await getMenuContext({ config, proxy });
+      await autoSyncSelectedModelsIfDrifted({
+        canReadDroidSyncState, config, context, normalizeModelIds, output,
+        readDroidSyncedModelIdsByProvider: readDroidSyncedByProvider, syncSelectedModelsFlow,
+      });
+      const refreshedContext = await getMenuContext({ config, proxy });
+      const action = await promptHomeAction({ menu, output, context: refreshedContext });
       if (action === "connect_provider") {
         await connectProviderFlow();
       } else if (action === "choose_models") {
         await chooseModelsFlow();
-      } else if (action === "sync_droid") {
-        await syncSelectedModelsFlow();
       } else if (action === "status") {
         await statusFlow();
       } else if (action === "start_proxy") {
@@ -331,7 +352,6 @@ function createInteractiveApi(overrides = {}) {
     output.printInfo("Exited interactive mode.");
     return { success: true };
   }
-
   return {
     chooseModelsFlow,
     connectProviderFlow,
@@ -339,7 +359,6 @@ function createInteractiveApi(overrides = {}) {
     syncSelectedModelsFlow,
   };
 }
-
 const interactiveApi = createInteractiveApi();
 
 module.exports = {

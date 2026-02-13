@@ -7,7 +7,7 @@ const COLORS = {
   reset: "\x1b[0m",
 
   // Brand accent
-  orange: "\x1b[38;5;202m",
+  orange: "\x1b[38;2;242;123;47m",
 
   // Semantic colors
   success: "\x1b[38;5;108m",

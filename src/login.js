@@ -11,7 +11,6 @@ const {
   printGuidedError,
   printInfo,
   printSuccess,
-  printWarning,
 } = require("./ui/output");
 
 const PROVIDERS = [
@@ -181,9 +180,17 @@ async function runLogin(provider, configPath, options = {}) {
 }
 
 function countConnectedProviders(configValues) {
-  const authDir = config.resolveAuthDir(configValues.authDir || config.DEFAULT_AUTH_DIR);
+  return getProvidersWithConnectionStatus(configValues).filter((provider) => provider.connected);
+}
+
+function getProvidersWithConnectionStatus(configValues) {
+  const values = configValues && typeof configValues === "object" ? configValues : {};
+  const authDir = config.resolveAuthDir(values.authDir || config.DEFAULT_AUTH_DIR);
   const files = listAuthFiles(authDir).map((name) => name.toLowerCase());
-  return PROVIDERS.filter((provider) => hasProviderAuth(provider.id, files));
+  return PROVIDERS.map((provider) => ({
+    ...provider,
+    connected: hasProviderAuth(provider.id, files),
+  }));
 }
 
 async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) {
@@ -232,7 +239,7 @@ async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) 
   const connectedProviders = countConnectedProviders(configValues).map((item) => item.id);
 
   if (!quiet && selectModels === true) {
-    printInfo("Model selection menu is not part of this MVP. Use `droxy droid sync` for live model sync.");
+    printInfo("Model sync requested. Droxy will sync detected models to Droid after login.");
   }
 
   return {
@@ -247,6 +254,7 @@ module.exports = {
   AUTH_HINTS,
   PROVIDERS,
   hasProviderAuth,
+  getProvidersWithConnectionStatus,
   listAuthFiles,
   listProvidersText,
   loginFlow,

@@ -5,7 +5,7 @@
 Droxy uses one style system. There are no user-selectable voice profiles.
 
 - Tone: Anthropic-inspired writing voice.
-- Accent color: Droid orange (`#FF5C00`).
+- Accent color: Droid orange (`#F27B2F`).
 - UX shape: calm guidance with concrete next commands.
 
 This is inspiration, not trademark imitation. Do not copy proprietary Anthropic copy.

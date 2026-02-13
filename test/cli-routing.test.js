@@ -13,6 +13,7 @@ function createDeps() {
       version: "0.1.0",
       output: {
         log: (msg) => calls.push(["log", String(msg)]),
+        printInfo: (msg) => calls.push(["printInfo", String(msg)]),
         printGuidedError: (payload) => calls.push(["printGuidedError", payload]),
       },
       proxy: {
@@ -51,13 +52,28 @@ test("routes start/stop/status commands", async () => {
   ]]);
 });
 
-test("routes login/connect with provider and model flags", async () => {
+test("routes login/connect with automatic model sync defaults", async () => {
   const login = createDeps();
-  await runCli(["login", "claude", "--with-models"], login.deps);
-  assert.deepEqual(login.calls, [[
-    "loginFlow",
-    { providerId: "claude", selectModels: true, quiet: false },
-  ]]);
+  await runCli(["login", "claude"], login.deps);
+  assert.deepEqual(login.calls, [
+    [
+      "loginFlow",
+      { providerId: "claude", selectModels: true, quiet: false },
+    ],
+    ["printInfo", "Auto-syncing detected models to Droid..."],
+    ["syncDroidSettings", { quiet: false }],
+  ]);
+
+  const withModels = createDeps();
+  await runCli(["connect", "codex", "--with-models"], withModels.deps);
+  assert.deepEqual(withModels.calls, [
+    [
+      "loginFlow",
+      { providerId: "codex", selectModels: true, quiet: false },
+    ],
+    ["printInfo", "Auto-syncing detected models to Droid..."],
+    ["syncDroidSettings", { quiet: false }],
+  ]);
 
   const connect = createDeps();
   await runCli(["connect", "codex", "--skip-models", "--quiet"], connect.deps);
@@ -65,12 +81,6 @@ test("routes login/connect with provider and model flags", async () => {
     "loginFlow",
     { providerId: "codex", selectModels: false, quiet: true },
   ]]);
-});
-
-test("routes droid sync", async () => {
-  const target = createDeps();
-  await runCli(["droid", "sync", "--quiet"], target.deps);
-  assert.deepEqual(target.calls, [["syncDroidSettings", { quiet: true }]]);
 });
 
 test("routes no-arg and ui command to interactive home", async () => {

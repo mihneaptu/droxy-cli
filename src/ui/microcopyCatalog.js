@@ -61,7 +61,7 @@ const CLAUDE_MICROCOPY = {
       restart: "Undo: run `droxy stop` if you want Droxy offline.",
       login: "Undo: run `droxy login` again to refresh or switch accounts.",
       droidSync:
-        "Undo: restore `~/.factory/config.json.bak` (if available), then re-run `droxy droid sync`.",
+        "Undo: restore `~/.factory/config.json.bak` (if available), then open `droxy ui` and choose models.",
       pluginInstall: "Undo: run `droxy plugin uninstall`.",
       pluginUninstall: "Undo: run `droxy plugin install`.",
     },
@@ -193,7 +193,7 @@ const CLAUDE_MICROCOPY = {
       startDroxy: "Start Droxy to begin",
       connectAccount: "Connect an account",
       chooseModels: "Open Choose models",
-      enableSync: "Open Droid sync to enable sync",
+      enableSync: "Choose models to enable automatic Droid sync",
       ready: "Ready to use",
     },
   },

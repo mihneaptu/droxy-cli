@@ -17,7 +17,7 @@ test("ui profile resolution always maps to single canonical profile", () => {
 });
 
 test("design tokens keep Droid orange as primary accent", () => {
-  assert.equal(DESIGN_TOKENS.claude.colors.accent, "#FF5C00");
+  assert.equal(DESIGN_TOKENS.claude.colors.accent, "#F27B2F");
 });
 
 test("voice catalog exposes one profile and shared copy", () => {

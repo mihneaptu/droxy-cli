@@ -25,7 +25,7 @@ test("printGuidedError renders what/why/next structure", () => {
     output.printGuidedError({
       what: "Sync failed.",
       why: "Proxy is unreachable.",
-      next: ["Run: droxy start", "Retry: droxy droid sync"],
+      next: ["Run: droxy start", "Retry via interactive auto-sync: droxy ui"],
     });
   });
 

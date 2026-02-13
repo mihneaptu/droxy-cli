@@ -1,7 +1,7 @@
 "use strict";
 
 const CLAUDE_COLORS = {
-  accent: "#FF5C00",
+  accent: "#F27B2F",
   neutral: "#334155",
   background: "#F8FAFC",
   text: "#0F172A",
