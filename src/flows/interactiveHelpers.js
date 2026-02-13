@@ -48,13 +48,13 @@ function resolveProviderFromHint(value) {
   return "";
 }
 
-function resolveProviderForModelEntry(entry) {
+function extractModelIdFromEntry(entry) {
   if (!entry || typeof entry !== "object") return "";
+  return normalizeText(entry.id || entry.model || entry.name || entry.slug);
+}
 
-  const modelId = entry.id || entry.model || entry.name || entry.slug || "";
-  const fromModelId = resolveProviderFromHint(modelId);
-  if (fromModelId) return fromModelId;
-
+function resolveProviderFromEntryMetadata(entry) {
+  if (!entry || typeof entry !== "object") return "";
   let raw =
     entry.provider ||
     entry.provider_id ||
@@ -77,6 +77,44 @@ function resolveProviderForModelEntry(entry) {
   return resolveProviderFromHint(raw);
 }
 
+function resolveModelFamilyFromModelId(modelId) {
+  const normalized = normalizeText(modelId).toLowerCase();
+  if (!normalized) return "";
+  if (normalized.includes("gemini")) return "gemini";
+  if (
+    normalized === "gpt" ||
+    normalized.startsWith("gpt-") ||
+    normalized.startsWith("o1") ||
+    normalized.startsWith("o3") ||
+    normalized.startsWith("o4")
+  ) {
+    return "gpt";
+  }
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("qwen")) return "qwen";
+  if (normalized.includes("kimi") || normalized.includes("moonshot")) return "kimi";
+  if (
+    normalized.includes("iflow") ||
+    normalized.includes("deepseek") ||
+    normalized.includes("glm-") ||
+    normalized.includes("minimax")
+  ) {
+    return "iflow";
+  }
+  if (normalized.includes("tab_")) return "tab";
+  return "";
+}
+
+function resolveProviderForModelEntry(entry) {
+  if (!entry || typeof entry !== "object") return "";
+
+  const fromMetadata = resolveProviderFromEntryMetadata(entry);
+  if (fromMetadata) return fromMetadata;
+
+  const modelId = extractModelIdFromEntry(entry);
+  return resolveProviderFromHint(modelId);
+}
+
 function buildProviderModelGroups(entries, providerStatuses) {
   const providers = Array.isArray(providerStatuses) ? providerStatuses : [];
   const providerMap = new Map();
@@ -92,10 +130,25 @@ function buildProviderModelGroups(entries, providerStatuses) {
   }
 
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const modelId = normalizeText(entry && entry.id ? entry.id : "");
+    const modelId = extractModelIdFromEntry(entry);
     if (!modelId) continue;
 
-    const providerId = resolveProviderForModelEntry(entry);
+    let providerId = resolveProviderForModelEntry(entry);
+    if (!providerMap.has(providerId)) {
+      const explicitProviderId = resolveProviderFromEntryMetadata(entry);
+      if (explicitProviderId) {
+        if (providerMap.has(explicitProviderId)) {
+          providerId = explicitProviderId;
+        } else {
+          continue;
+        }
+      } else {
+        const fallbackProviderId = resolveProviderFromHint(modelId);
+        if (providerMap.has(fallbackProviderId)) {
+          providerId = fallbackProviderId;
+        }
+      }
+    }
     if (providerId && providerMap.has(providerId)) {
       providerMap.get(providerId).models.push(modelId);
     }
@@ -133,10 +186,12 @@ function mergeProviderModelSelection(
   existingSelection,
   providerModels,
   selectedWithinProvider,
-  providerId = ""
+  providerId = "",
+  persistedProviderModels = []
 ) {
   const existing = normalizeModelIds(existingSelection);
   const providerSet = new Set(normalizeModelIds(providerModels));
+  const persistedProviderSet = new Set(normalizeModelIds(persistedProviderModels));
   const targetProviderId = resolveProviderForSelection(
     providerId,
     providerModels,
@@ -144,6 +199,7 @@ function mergeProviderModelSelection(
   );
   const remainder = existing.filter((modelId) => {
     if (providerSet.has(modelId)) return false;
+    if (persistedProviderSet.has(modelId)) return false;
     if (!targetProviderId) return true;
     return resolveProviderFromHint(modelId) !== targetProviderId;
   });
@@ -184,6 +240,8 @@ module.exports = {
   HOME_ACTIONS,
   mergeProviderModelSelection,
   normalizeModelIds,
+  resolveModelFamilyFromModelId,
+  resolveProviderFromEntryMetadata,
   resolveProviderForModelEntry,
   resolveProviderFromHint,
   normalizeText,
