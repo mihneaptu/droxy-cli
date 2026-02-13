@@ -44,3 +44,27 @@ test("printError keeps compatibility and adds next command guidance", () => {
   assert.match(text, /No proxy binary found\./);
   assert.match(text, /Run: droxy start/);
 });
+
+test("printGuidedError omits next section when no next steps are provided", () => {
+  const text = captureStdout(() => {
+    output.printGuidedError({
+      what: "Sync skipped.",
+      why: "No selected models were found.",
+      next: [],
+    });
+  });
+
+  assert.match(text, /Sync skipped\./);
+  assert.match(text, /Why:/);
+  assert.doesNotMatch(text, /Next:/);
+});
+
+test("printError adds calm fallback guidance when hint and command are missing", () => {
+  const text = captureStdout(() => {
+    output.printError("Request failed.");
+  });
+
+  assert.match(text, /Request failed\./);
+  assert.match(text, /Droxy could not complete this step yet\./);
+  assert.match(text, /Run: droxy help/);
+});

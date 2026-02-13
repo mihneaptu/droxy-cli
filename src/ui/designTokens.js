@@ -48,8 +48,8 @@ const CLAUDE_DESIGN_TOKENS = {
   voice: {
     style: "anthropic-inspired",
     priorities: [
-      "clear-with-context",
-      "calm-under-failure",
+      "cognitive-clarity",
+      "calm-trust",
       "specific-next-command",
       "honest-uncertainty",
     ],

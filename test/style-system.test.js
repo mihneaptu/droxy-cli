@@ -27,3 +27,20 @@ test("voice catalog exposes one profile and shared copy", () => {
     /next command/i
   );
 });
+
+test("design tokens keep canonical voice priorities", () => {
+  assert.deepEqual(
+    DESIGN_TOKENS.claude.voice.priorities,
+    [
+      "cognitive-clarity",
+      "calm-trust",
+      "specific-next-command",
+      "honest-uncertainty",
+    ]
+  );
+});
+
+test("voice catalog includes thinking-space and user-interest principles", () => {
+  assert.match(getMessage("voice.principles.thinkingSpace"), /thinking space/i);
+  assert.match(getMessage("voice.principles.userInterestFirst"), /user/i);
+});

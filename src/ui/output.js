@@ -14,7 +14,7 @@ function logCentered(line, width = 56) {
 }
 
 function printSuccess(message) {
-  log(`${colorize(ICONS.success, COLORS.success)} ${message}`);
+  log(`${colorize(ICONS.success, COLORS.success)} ${String(message || "").trim()}`);
 }
 
 function normalizeNextSteps(next) {
@@ -25,7 +25,7 @@ function normalizeNextSteps(next) {
 }
 
 function printGuidedError({ what, why = "", next = [] } = {}) {
-  const safeWhat = String(what || "Something went wrong.").trim();
+  const safeWhat = String(what || "That step did not complete yet.").trim();
   const safeWhy = String(why || "").trim();
   const steps = normalizeNextSteps(next);
 
@@ -46,11 +46,13 @@ function printGuidedError({ what, why = "", next = [] } = {}) {
 }
 
 function printError(message, hint = "", tryCmd = "") {
+  const safeHint = String(hint || "").trim() || "Droxy could not complete this step yet.";
   const next = [];
   if (tryCmd) next.push(`Run: ${tryCmd}`);
+  else next.push("Run: droxy help");
   printGuidedError({
     what: message,
-    why: hint,
+    why: safeHint,
     next,
   });
 }
@@ -63,15 +65,17 @@ function printTeachingError({ what, why = "", context = "", suggestions = [] }) 
 }
 
 function printWarning(message) {
-  log(`${colorize(ICONS.warning, COLORS.warning)} ${message}`);
+  log(`${colorize(ICONS.warning, COLORS.warning)} ${String(message || "").trim()}`);
 }
 
 function printInfo(message) {
-  log(`${colorize(ICONS.info, COLORS.info)} ${message}`);
+  log(`${colorize(ICONS.info, COLORS.info)} ${String(message || "").trim()}`);
 }
 
 function printNextStep(message) {
-  log(colorize(`  Next: ${message}`, COLORS.dim));
+  const safeMessage = String(message || "").trim();
+  if (!safeMessage) return;
+  log(colorize(`  Next: ${safeMessage}`, COLORS.dim));
 }
 
 function printSmartSuggestion(state) {
