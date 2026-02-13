@@ -43,7 +43,7 @@ test("interactive mode chooses provider-first models and syncs merged selection"
     apiKey: "k",
     selectedModels: ["claude-opus"],
   };
-  const singleSelections = [{ index: 1 }, { index: 1 }];
+  const singleSelections = [{ index: 2 }, { index: 1 }];
 
   const interactive = createInteractiveApi({
     config: {
@@ -140,7 +140,7 @@ test("choose models auto-sync clears Droid when selection is empty", async () =>
     apiKey: "k",
     selectedModels: ["gpt-5"],
   };
-  const singleSelections = [{ index: 1 }, { index: 0 }];
+  const singleSelections = [{ index: 2 }, { index: 0 }];
 
   const interactive = createInteractiveApi({
     config: {
@@ -332,7 +332,7 @@ test("provider model picker preselects Droid-synced models when no prior selecti
   const selectSingleCalls = [];
   const selectMultipleCalls = [];
   let state = {};
-  const singleSelections = [{ index: 1 }, { index: 0 }];
+  const singleSelections = [{ index: 2 }, { index: 0 }];
 
   const interactive = createInteractiveApi({
     config: {
@@ -405,7 +405,7 @@ test("provider model picker prefers Droid-synced defaults over stale local selec
   let state = {
     selectedModels: ["kimi-k2", "kimi-k2-0905", "kimi-k2-thinking", "kimi-k2.5"],
   };
-  const singleSelections = [{ index: 1 }, { index: 0 }];
+  const singleSelections = [{ index: 2 }, { index: 0 }];
 
   const interactive = createInteractiveApi({
     config: {
@@ -481,7 +481,7 @@ test("provider model picker prefers Droid-synced defaults over stale local selec
 test("model provider picker hides disconnected providers", async () => {
   const selectSingleCalls = [];
   const selectMultipleCalls = [];
-  const singleSelections = [{ index: 1 }, { index: 0 }];
+  const singleSelections = [{ index: 2 }, { index: 0 }];
 
   const interactive = createInteractiveApi({
     config: {
@@ -551,7 +551,7 @@ test("model picker cancel returns to provider picker", async () => {
   const outputCalls = [];
   const selectSingleCalls = [];
   const selectMultipleCalls = [];
-  const singleSelections = [{ index: 1 }, { index: 0 }, { index: 0 }];
+  const singleSelections = [{ index: 2 }, { index: 0 }, { index: 0 }];
   let multiCount = 0;
 
   const interactive = createInteractiveApi({
@@ -627,7 +627,7 @@ test("connect provider menu omits status badges and keeps refresh message", asyn
   const loginCalls = [];
   const selectSingleCalls = [];
   let state = {};
-  const singleSelections = [{ index: 0 }, { index: 0 }, { index: 3 }];
+  const singleSelections = [{ index: 0 }, { index: 0 }, { index: 4 }];
 
   const interactive = createInteractiveApi({
     config: {
@@ -694,6 +694,92 @@ test("connect provider menu omits status badges and keeps refresh message", asyn
   );
 });
 
+test("accounts menu can list status and connect account", async () => {
+  const outputCalls = [];
+  const loginCalls = [];
+  const selectSingleCalls = [];
+  let homePromptCount = 0;
+  let accountsPromptCount = 0;
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 8317,
+      }),
+      readState: () => ({}),
+      updateState: () => ({}),
+      configExists: () => true,
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [
+        { id: "claude", label: "Claude (Anthropic)" },
+        { id: "codex", label: "OpenAI / Codex" },
+      ],
+      getProvidersWithConnectionStatus: () => [
+        { id: "claude", label: "Claude (Anthropic)", connected: true },
+        { id: "codex", label: "OpenAI / Codex", connected: false },
+      ],
+      loginFlow: async (opts) => {
+        loginCalls.push(opts);
+        return { success: true, provider: opts.providerId };
+      },
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async () => ({ cancelled: true, selected: [] }),
+      selectSingle: async (payload) => {
+        selectSingleCalls.push(payload);
+        if (/Droxy Interactive/i.test(payload.title || "")) {
+          homePromptCount += 1;
+          const label = homePromptCount === 1 ? "Accounts" : "Exit";
+          return { cancelled: false, index: payload.items.indexOf(label), value: label };
+        }
+        if (/Accounts/i.test(payload.title || "")) {
+          accountsPromptCount += 1;
+          const label = accountsPromptCount === 1 ? "List Accounts" :
+            accountsPromptCount === 2 ? "Connect Account" : "Back to Menu";
+          return { cancelled: false, index: payload.items.indexOf(label), value: label };
+        }
+        if (/Choose provider/i.test(payload.title || "")) {
+          return { cancelled: false, index: 0, value: payload.items[0] };
+        }
+        return { cancelled: true, index: -1, value: "" };
+      },
+    },
+    output: createOutputStub(outputCalls),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      syncDroidSettings: async () => ({ success: true }),
+    },
+  });
+
+  await interactive.runInteractiveHome();
+
+  const homePrompt = selectSingleCalls.find((payload) => /Droxy Interactive/i.test(payload.title || ""));
+  const accountsPrompt = selectSingleCalls.find((payload) => /Accounts/i.test(payload.title || ""));
+  assert.equal(Boolean(homePrompt), true);
+  assert.equal(homePrompt.items.includes("Accounts"), true);
+  assert.equal(Boolean(accountsPrompt), true);
+  assert.equal(accountsPrompt.items.includes("List Accounts"), true);
+  assert.equal(accountsPrompt.items.includes("Connect Account"), true);
+  assert.deepEqual(loginCalls, [{ providerId: "claude", quiet: false }]);
+  assert.equal(
+    outputCalls.some(
+      (entry) => entry[0] === "printInfo" && /Accounts connected: 1\/2/.test(entry[1])
+    ),
+    true
+  );
+});
+
 test("interactive mode reports non-interactive sessions", async () => {
   const outputCalls = [];
   const interactive = createInteractiveApi({
@@ -717,6 +803,7 @@ test("buildVisibleHomeActions hides stop when proxy is not running", () => {
     selectedModelsCount: 0,
   });
   const labels = actions.map((item) => item.label);
+  assert.equal(labels.includes("Accounts"), true);
   assert.equal(labels.includes("Start Proxy"), true);
   assert.equal(labels.includes("Stop Proxy"), false);
   assert.equal(labels.includes("Sync to Droid"), false);
@@ -730,6 +817,7 @@ test("buildVisibleHomeActions shows stop without manual sync when proxy runs", (
     selectedModelsCount: 2,
   });
   const labels = actions.map((item) => item.label);
+  assert.equal(labels.includes("Accounts"), true);
   assert.equal(labels.includes("Start Proxy"), false);
   assert.equal(labels.includes("Stop Proxy"), true);
   assert.equal(labels.includes("Choose Models"), true);
