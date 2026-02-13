@@ -3,6 +3,7 @@
 const helpers = require("../helpers");
 
 const HOME_ACTIONS = Object.freeze({
+  accounts: { id: "accounts", label: "Accounts" },
   chooseModels: { id: "choose_models", label: "Choose Models" },
   connectProvider: { id: "connect_provider", label: "Connect Provider" },
   exit: { id: "exit", label: "Exit" },
@@ -172,6 +173,7 @@ function buildVisibleHomeActions(context = {}) {
   const actions = [];
 
   actions.push(HOME_ACTIONS.connectProvider);
+  actions.push(HOME_ACTIONS.accounts);
 
   if (configExists) {
     if (proxyRunning) {

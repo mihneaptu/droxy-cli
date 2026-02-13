@@ -31,8 +31,9 @@ droxy version
 
 Interactive flow:
 
-1. Connect provider
-   - Shows which providers are already connected
+1. Open Accounts
+   - Shows connected/not connected status for each provider
+   - Supports listing account status and connecting a provider
 2. Choose provider, then choose models
    - Model picker shows connected providers only and selected counts per provider
    - Includes a separate thinking-models menu for selected models
