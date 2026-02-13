@@ -857,9 +857,12 @@ function createSyncApi(overrides = {}) {
       /['"`]([A-Za-z0-9][A-Za-z0-9._:/-]*)['"`]\s+model\b/gi,
       /\bmodel\s+['"`]([A-Za-z0-9][A-Za-z0-9._:/-]*)['"`]/gi,
     ];
+    const texts = collectStatusMessageTexts(statusMessage);
+    if (!texts.length) return [];
+    const hasUnsupportedHint = texts.some((text) => shouldParseUnsupportedModelText(text));
+    if (!hasUnsupportedHint) return [];
 
-    for (const text of collectStatusMessageTexts(statusMessage)) {
-      if (!shouldParseUnsupportedModelText(text)) continue;
+    for (const text of texts) {
       for (const pattern of patterns) {
         pattern.lastIndex = 0;
         let match;
