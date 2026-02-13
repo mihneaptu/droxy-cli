@@ -51,6 +51,21 @@ test("buildProviderModelGroups prefers model-id family over raw provider tag", (
   assert.equal(Array.isArray(byId.get("antigravity")) ? byId.get("antigravity").length : 0, 0);
 });
 
+test("buildProviderModelGroups falls back to explicit provider when family provider is not connected", () => {
+  const groups = buildProviderModelGroups(
+    [
+      { model: "gpt-5", provider: "antigravity" },
+      { id: "claude-opus-4-5-thinking", provider: "antigravity" },
+    ],
+    [
+      { id: "antigravity", label: "Antigravity", connected: true },
+    ]
+  );
+
+  assert.deepEqual(groups.map((group) => group.id), ["antigravity"]);
+  assert.deepEqual(groups[0].models, ["claude-opus-4-5-thinking", "gpt-5"]);
+});
+
 test("mergeProviderModelSelection replaces only selected provider segment", () => {
   const merged = mergeProviderModelSelection(
     ["claude-opus", "claude-sonnet", "gpt-5"],
