@@ -8,15 +8,14 @@ const outputModule = require("../ui/output");
 const { Spinner } = require("../ui/spinner");
 const { autoSyncSelectedModelsIfDrifted } = require("./interactiveAutoSync");
 const { getMenuContext, promptHomeAction } = require("./interactiveHome");
+const { createInteractiveProviderActions } = require("./interactiveProviderActions");
 const {
   fetchModelEntriesForSelection,
   getConnectedProvidersWithStatus,
-  getProvidersWithStatus,
   promptModelSelection,
   promptThinkingModelModes,
   promptThinkingModelSelection,
   promptProviderModelsSelection,
-  promptProviderSelection,
   readDroidSyncedModelIdsByProvider,
   resolveThinkingModelModes,
   resolveThinkingModels,
@@ -44,6 +43,20 @@ function createInteractiveApi(overrides = {}) {
     overrides.isInteractiveSession ||
     (() => Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY));
   const createSpinner = overrides.createSpinner || ((text) => new Spinner(text));
+  const {
+    accountsFlow,
+    connectProviderFlow,
+    startProxyFlow,
+    statusFlow,
+    stopProxyFlow,
+  } = createInteractiveProviderActions({
+    config,
+    login,
+    menu,
+    now,
+    output,
+    proxy,
+  });
 
   function readPersistedModelsByProvider(state = {}) {
     const factory = state && state.factory && typeof state.factory === "object" ? state.factory : {};
@@ -76,33 +89,6 @@ function createInteractiveApi(overrides = {}) {
       : [];
     const sourceIds = persistedIds.length ? persistedIds : droidIds;
     return normalizeModelIds(sourceIds).filter((modelId) => providerGroup.models.includes(modelId));
-  }
-
-  async function connectProviderFlow() {
-    config.ensureConfig();
-    const configValues = config.readConfigValues();
-    const providers = getProvidersWithStatus(login, configValues);
-    const provider = await promptProviderSelection(menu, providers);
-    if (!provider) {
-      output.printInfo("Provider selection cancelled.");
-      return { success: false, reason: "cancelled" };
-    }
-    if (provider.connected) {
-      output.printInfo("Provider already connected. Continuing will refresh login.");
-    }
-    const result = await login.loginFlow({
-      providerId: provider.id,
-      quiet: false,
-    });
-    if (result && result.success === false) {
-      return result;
-    }
-    config.updateState({
-      selectedProvider: provider.id,
-      lastInteractiveActionAt: now(),
-    });
-    output.printSuccess(`Provider selected: ${provider.id}`);
-    return { success: true, provider: provider.id };
   }
   async function chooseModelsFlow() {
     const spinner = createSpinner("Fetching available models...").start();
@@ -362,20 +348,6 @@ function createInteractiveApi(overrides = {}) {
     }
     return result || { success: false, reason: "sync_failed" };
   }
-  async function runAndStamp(action) {
-    const result = await action();
-    config.updateState({ lastInteractiveActionAt: now() });
-    return result;
-  }
-  async function statusFlow() {
-    return runAndStamp(() => proxy.statusProxy({ check: false, json: false, verbose: true, quiet: false }));
-  }
-  async function startProxyFlow() {
-    return runAndStamp(() => proxy.startProxy({ allowAttach: true, quiet: false }));
-  }
-  async function stopProxyFlow() {
-    return runAndStamp(() => proxy.stopProxy({ force: false, quiet: false }));
-  }
   async function runInteractiveHome() {
     if (!isInteractiveSession()) {
       output.printGuidedError({
@@ -396,6 +368,8 @@ function createInteractiveApi(overrides = {}) {
       const action = await promptHomeAction({ menu, output, context: refreshedContext });
       if (action === "connect_provider") {
         await connectProviderFlow();
+      } else if (action === "accounts") {
+        await accountsFlow();
       } else if (action === "choose_models") {
         await chooseModelsFlow();
       } else if (action === "status") {
@@ -414,6 +388,7 @@ function createInteractiveApi(overrides = {}) {
     return { success: true };
   }
   return {
+    accountsFlow,
     chooseModelsFlow,
     connectProviderFlow,
     runInteractiveHome,
