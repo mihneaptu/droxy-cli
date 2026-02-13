@@ -158,3 +158,195 @@ test("splitModelsForFactoryEntries classifies providers", () => {
   assert.deepEqual(split.openai, ["gpt-5"]);
   assert.deepEqual(split.anthropic, ["claude-opus", "claude-sonnet"]);
 });
+
+test("filterDetectedEntriesBySelection keeps only explicitly selected models", () => {
+  const result = sync.filterDetectedEntriesBySelection(
+    [
+      { id: "gpt-5", provider: "openai" },
+      { id: "claude-opus", provider: "anthropic" },
+      { id: "claude-sonnet", provider: "anthropic" },
+    ],
+    ["claude-opus", "missing-model"]
+  );
+
+  assert.deepEqual(result.selectedIds, ["claude-opus", "missing-model"]);
+  assert.equal(result.skippedCount, 1);
+  assert.deepEqual(result.entries.map((entry) => entry.id), ["claude-opus"]);
+});
+
+test("filterDetectedEntriesBySelection is a no-op when no selection is provided", () => {
+  const entries = [{ id: "gpt-5" }, { id: "claude-opus" }];
+  const result = sync.filterDetectedEntriesBySelection(entries, []);
+  assert.deepEqual(result.entries, entries);
+  assert.deepEqual(result.selectedIds, []);
+  assert.equal(result.skippedCount, 0);
+});
+
+test("filterDetectedEntriesBySelection treats explicit empty selection as clear", () => {
+  const entries = [{ id: "gpt-5" }, { id: "claude-opus" }];
+  const result = sync.filterDetectedEntriesBySelection(entries, [], {
+    explicitSelection: true,
+  });
+  assert.deepEqual(result.entries, []);
+  assert.deepEqual(result.selectedIds, []);
+  assert.equal(result.skippedCount, 0);
+});
+
+test("syncDroidSettings writes files from provided detected entries without network probe", async () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    let updatedState = null;
+    const failRequest = () => {
+      throw new Error("network should not be used");
+    };
+
+    const api = sync.createSyncApi({
+      config: {
+        DEFAULT_PORT: 8317,
+        configExists: () => true,
+        ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+        readConfigValues: () => ({
+          host: "127.0.0.1",
+          port: 8317,
+          tlsEnabled: false,
+          apiKey: "k",
+        }),
+        readState: () => ({ apiKey: "k" }),
+        updateState: (patch) => {
+          updatedState = patch;
+          return patch;
+        },
+      },
+      http: { request: failRequest },
+      https: { request: failRequest },
+      output: {
+        printGuidedError: () => {},
+        printSuccess: () => {},
+      },
+    });
+
+    const result = await api.syncDroidSettings({
+      quiet: true,
+      selectedModels: ["gpt-5"],
+      detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+      protocol: "http",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.result && result.result.status, "synced");
+    const configPath = path.join(process.env.DROXY_FACTORY_DIR, "config.json");
+    const settingsPath = path.join(process.env.DROXY_FACTORY_DIR, "settings.json");
+    const configRoot = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const settingsRoot = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    assert.deepEqual((configRoot.custom_models || []).map((entry) => entry.model), ["gpt-5"]);
+    assert.deepEqual((settingsRoot.customModels || []).map((entry) => entry.model), ["gpt-5"]);
+    assert.equal(Boolean(updatedState && updatedState.factory), true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("syncDroidSettings prunes stale selected IDs when only partial matches are detected", async () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    let updatedState = null;
+    const failRequest = () => {
+      throw new Error("network should not be used");
+    };
+
+    const api = sync.createSyncApi({
+      config: {
+        DEFAULT_PORT: 8317,
+        configExists: () => true,
+        ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+        readConfigValues: () => ({
+          host: "127.0.0.1",
+          port: 8317,
+          tlsEnabled: false,
+          apiKey: "k",
+        }),
+        readState: () => ({ apiKey: "k" }),
+        updateState: (patch) => {
+          updatedState = patch;
+          return patch;
+        },
+      },
+      http: { request: failRequest },
+      https: { request: failRequest },
+      output: {
+        printGuidedError: () => {},
+        printSuccess: () => {},
+      },
+    });
+
+    const result = await api.syncDroidSettings({
+      quiet: true,
+      selectedModels: ["gpt-5", "missing-model"],
+      detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+      protocol: "http",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.result && result.result.status, "synced");
+    assert.deepEqual(result.result && result.result.selectedModels, ["gpt-5"]);
+    assert.equal(result.result && result.result.selectedModelsSkipped, 1);
+    assert.deepEqual(updatedState && updatedState.selectedModels, ["gpt-5"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("syncDroidSettings clears Droid models when selection is explicitly empty", async () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    let updatedState = null;
+    const failRequest = () => {
+      throw new Error("network should not be used");
+    };
+
+    const api = sync.createSyncApi({
+      config: {
+        DEFAULT_PORT: 8317,
+        configExists: () => true,
+        ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+        readConfigValues: () => ({
+          host: "127.0.0.1",
+          port: 8317,
+          tlsEnabled: false,
+          apiKey: "k",
+        }),
+        readState: () => ({ apiKey: "k" }),
+        updateState: (patch) => {
+          updatedState = patch;
+          return patch;
+        },
+      },
+      http: { request: failRequest },
+      https: { request: failRequest },
+      output: {
+        printGuidedError: () => {},
+        printSuccess: () => {},
+      },
+    });
+
+    const result = await api.syncDroidSettings({
+      quiet: true,
+      selectedModels: [],
+      detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+      protocol: "http",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.result && result.result.status, "cleared");
+    assert.deepEqual(result.result && result.result.selectedModels, []);
+    const configPath = path.join(process.env.DROXY_FACTORY_DIR, "config.json");
+    const settingsPath = path.join(process.env.DROXY_FACTORY_DIR, "settings.json");
+    const configRoot = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const settingsRoot = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    assert.deepEqual((configRoot.custom_models || []).map((entry) => entry.model), []);
+    assert.deepEqual((settingsRoot.customModels || []).map((entry) => entry.model), []);
+    assert.deepEqual(updatedState && updatedState.selectedModels, []);
+  } finally {
+    cleanup();
+  }
+});

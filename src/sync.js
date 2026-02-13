@@ -126,6 +126,39 @@ function createSyncApi(overrides = {}) {
     return { openai, anthropic };
   }
 
+  function normalizeSelectedModelIds(selectedModels) {
+    return helpers.normalizeIdList(selectedModels);
+  }
+
+  function filterDetectedEntriesBySelection(entries, selectedModels, options = {}) {
+    const explicitSelection =
+      options &&
+      typeof options === "object" &&
+      options.explicitSelection === true;
+    const selectedIds = normalizeSelectedModelIds(selectedModels);
+    if (!selectedIds.length) {
+      return {
+        entries: explicitSelection ? [] : Array.isArray(entries) ? entries : [],
+        selectedIds,
+        skippedCount: 0,
+      };
+    }
+
+    const selectedSet = new Set(selectedIds);
+    const nextEntries = [];
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const id = entry && entry.id ? String(entry.id) : "";
+      if (!id || !selectedSet.has(id)) continue;
+      nextEntries.push(entry);
+    }
+
+    return {
+      entries: nextEntries,
+      selectedIds,
+      skippedCount: Math.max(0, selectedIds.length - nextEntries.length),
+    };
+  }
+
   function normalizeUrl(url) {
     return helpers.normalizeUrl(url);
   }
@@ -669,10 +702,22 @@ function createSyncApi(overrides = {}) {
     return "Sync finished.";
   }
 
-  async function syncDroidSettings({ quiet = false } = {}) {
+  async function syncDroidSettings({
+    quiet = false,
+    selectedModels,
+    detectedEntries: detectedModelEntries,
+    protocol,
+  } = {}) {
     if (!config.configExists()) {
       if (!quiet) {
-        output.printWarning(`Config missing at ${config.getConfigPath()}`);
+        output.printGuidedError({
+          what: `Config missing at ${config.getConfigPath()}.`,
+          why: "Droid sync requires local Droxy config values (host, port, auth).",
+          next: [
+            "Run: droxy login",
+            "Then run: droxy ui and choose models",
+          ],
+        });
       }
       return { success: false, reason: "config_missing" };
     }
@@ -681,38 +726,98 @@ function createSyncApi(overrides = {}) {
     const state = config.readState() || {};
     const apiKey = configValues.apiKey || state.apiKey || "";
 
-    const protocolResolution = await resolveReachableProtocol(configValues, {
-      probePath: "/v1/models",
-    });
-
-    if (!protocolResolution.reachable) {
-      const result = {
-        status: "skipped",
-        reason: "proxy_unreachable",
-        preferredProtocol: protocolResolution.preferredProtocol,
-        preferredError: helpers.formatErrorSummary(protocolResolution.preferredError),
-        fallbackError: helpers.formatErrorSummary(protocolResolution.fallbackError),
-      };
-      if (!quiet) {
-        output.printWarning(describeSyncResult(result));
-      }
-      return { success: false, reason: "proxy_unreachable", result };
-    }
-
+    let protocolResolution;
     let detectedEntries;
-    try {
-      detectedEntries = await fetchAvailableModelEntries(
-        { ...configValues, apiKey },
-        { protocolResolution }
-      );
-    } catch (err) {
-      const result = { status: "skipped", reason: "detect_failed", error: String(err.message || err) };
-      if (!quiet) {
-        output.printWarning("Model detection failed during Droid sync.");
+    if (Array.isArray(detectedModelEntries)) {
+      detectedEntries = detectedModelEntries;
+      const resolvedProtocol = protocol || configuredProtocol(configValues);
+      protocolResolution = {
+        reachable: true,
+        protocol: resolvedProtocol,
+        preferredProtocol: resolvedProtocol,
+        fallbackProtocol: null,
+        fallbackUsed: false,
+        preferredUrl: null,
+        fallbackUrl: null,
+        preferredError: null,
+        fallbackError: null,
+      };
+    } else {
+      protocolResolution = await resolveReachableProtocol(configValues, {
+        probePath: "/v1/models",
+      });
+
+      if (!protocolResolution.reachable) {
+        const result = {
+          status: "skipped",
+          reason: "proxy_unreachable",
+          preferredProtocol: protocolResolution.preferredProtocol,
+          preferredError: helpers.formatErrorSummary(protocolResolution.preferredError),
+          fallbackError: helpers.formatErrorSummary(protocolResolution.fallbackError),
+        };
+        if (!quiet) {
+          output.printGuidedError({
+            what: "Droid sync skipped.",
+            why: describeSyncResult(result),
+            next: [
+              "Run: droxy start",
+              "Run: droxy status --verbose",
+              "Then open: droxy ui",
+            ],
+          });
+        }
+        return { success: false, reason: "proxy_unreachable", result };
       }
-      return { success: false, reason: "detect_failed", result };
+
+      try {
+        detectedEntries = await fetchAvailableModelEntries(
+          { ...configValues, apiKey },
+          { protocolResolution }
+        );
+      } catch (err) {
+        const result = { status: "skipped", reason: "detect_failed", error: String(err.message || err) };
+        if (!quiet) {
+          output.printGuidedError({
+            what: "Model detection failed during Droid sync.",
+            why: String(err && err.message ? err.message : "Unknown detection error."),
+            next: [
+              "Verify your provider login: droxy login <provider>",
+              "Check proxy health: droxy status --verbose",
+              "Retry via interactive auto-sync: droxy ui",
+            ],
+          });
+        }
+        return { success: false, reason: "detect_failed", result };
+      }
     }
 
+    const hasExplicitSelection = Array.isArray(selectedModels);
+    const filtered = filterDetectedEntriesBySelection(detectedEntries, selectedModels, {
+      explicitSelection: hasExplicitSelection,
+    });
+    if (filtered.selectedIds.length && !filtered.entries.length) {
+      if (!quiet) {
+        output.printGuidedError({
+          what: "Selected models were not found in current proxy model list.",
+          why: "The model catalog changed or selected model IDs are stale.",
+          next: [
+            "Run: droxy status --verbose",
+            "Re-select models in interactive mode",
+            "Retry via interactive auto-sync: droxy ui",
+          ],
+        });
+      }
+      return {
+        success: false,
+        reason: "selected_models_not_found",
+        selectedModels: filtered.selectedIds,
+      };
+    }
+
+    detectedEntries = filtered.entries;
+    const syncedModelIds = normalizeSelectedModelIds(
+      detectedEntries.map((entry) => (entry && entry.id ? entry.id : ""))
+    );
     const split = splitModelsForFactoryEntries(detectedEntries);
 
     let result;
@@ -740,6 +845,11 @@ function createSyncApi(overrides = {}) {
 
     config.updateState({
       lastFactorySyncAt: new Date().toISOString(),
+      ...(hasExplicitSelection
+        ? { selectedModels: syncedModelIds }
+        : syncedModelIds.length
+          ? { selectedModels: syncedModelIds }
+          : {}),
       factory: {
         enabled: true,
         autoDetect: true,
@@ -754,7 +864,17 @@ function createSyncApi(overrides = {}) {
       output.printSuccess(describeSyncResult(result));
     }
 
-    return { success: true, result };
+    return {
+      success: true,
+      result: {
+        ...result,
+        ...(hasExplicitSelection
+          ? { selectedModels: syncedModelIds, selectedModelsSkipped: filtered.skippedCount }
+          : syncedModelIds.length
+            ? { selectedModels: syncedModelIds, selectedModelsSkipped: filtered.skippedCount }
+            : {}),
+      },
+    };
   }
 
   return {
@@ -765,8 +885,10 @@ function createSyncApi(overrides = {}) {
     describeSyncResult,
     fetchAvailableModelEntries,
     fetchAvailableModelEntriesSafe,
+    filterDetectedEntriesBySelection,
     getDroidManagedPaths,
     isDroxyManagedEntry,
+    normalizeSelectedModelIds,
     resolveReachableProtocol,
     splitModelsForFactoryEntries,
     syncDroidSettings,

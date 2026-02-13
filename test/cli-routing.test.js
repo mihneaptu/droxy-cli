@@ -7,12 +7,26 @@ const { runCli } = require("../droxy.js");
 
 function createDeps() {
   const calls = [];
+  const state = {
+    selectedModels: ["gpt-5"],
+  };
   return {
     calls,
     deps: {
       version: "0.1.0",
+      config: {
+        readState: () => state,
+      },
+      helpers: {
+        normalizeIdList: (items) =>
+          Array.from(new Set(Array.isArray(items) ? items.map((item) => String(item || "").trim()) : []))
+            .filter(Boolean)
+            .sort((left, right) => left.localeCompare(right)),
+      },
       output: {
         log: (msg) => calls.push(["log", String(msg)]),
+        printInfo: (msg) => calls.push(["printInfo", String(msg)]),
+        printGuidedError: (payload) => calls.push(["printGuidedError", payload]),
       },
       proxy: {
         startProxy: async (opts) => calls.push(["startProxy", opts]),
@@ -25,6 +39,10 @@ function createDeps() {
       sync: {
         syncDroidSettings: async (opts) => calls.push(["syncDroidSettings", opts]),
       },
+      interactive: {
+        runInteractiveHome: async () => calls.push(["runInteractiveHome"]),
+      },
+      isInteractiveSession: () => true,
     },
   };
 }
@@ -46,13 +64,39 @@ test("routes start/stop/status commands", async () => {
   ]]);
 });
 
-test("routes login/connect with provider and model flags", async () => {
+test("routes login/connect with automatic model sync defaults", async () => {
   const login = createDeps();
-  await runCli(["login", "claude", "--with-models"], login.deps);
-  assert.deepEqual(login.calls, [[
-    "loginFlow",
-    { providerId: "claude", selectModels: true, quiet: false },
-  ]]);
+  await runCli(["login", "claude"], login.deps);
+  assert.deepEqual(login.calls, [
+    [
+      "loginFlow",
+      { providerId: "claude", selectModels: true, quiet: false },
+    ],
+    ["printInfo", "Auto-syncing selected models to Droid..."],
+    ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
+  ]);
+
+  const withModels = createDeps();
+  await runCli(["connect", "codex", "--with-models"], withModels.deps);
+  assert.deepEqual(withModels.calls, [
+    [
+      "loginFlow",
+      { providerId: "codex", selectModels: true, quiet: false },
+    ],
+    ["printInfo", "Auto-syncing selected models to Droid..."],
+    ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
+  ]);
+
+  const noSelection = createDeps();
+  noSelection.deps.config.readState = () => ({});
+  await runCli(["login", "claude"], noSelection.deps);
+  assert.deepEqual(noSelection.calls, [
+    [
+      "loginFlow",
+      { providerId: "claude", selectModels: true, quiet: false },
+    ],
+    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models."],
+  ]);
 
   const connect = createDeps();
   await runCli(["connect", "codex", "--skip-models", "--quiet"], connect.deps);
@@ -62,10 +106,21 @@ test("routes login/connect with provider and model flags", async () => {
   ]]);
 });
 
-test("routes droid sync", async () => {
+test("routes no-arg and ui command to interactive home", async () => {
+  const first = createDeps();
+  await runCli([], first.deps);
+  assert.deepEqual(first.calls, [["runInteractiveHome"]]);
+
+  const second = createDeps();
+  await runCli(["ui"], second.deps);
+  assert.deepEqual(second.calls, [["runInteractiveHome"]]);
+});
+
+test("prints help for no-arg in non-interactive sessions", async () => {
   const target = createDeps();
-  await runCli(["droid", "sync", "--quiet"], target.deps);
-  assert.deepEqual(target.calls, [["syncDroidSettings", { quiet: true }]]);
+  target.deps.isInteractiveSession = () => false;
+  await runCli([], target.deps);
+  assert.equal(target.calls.some((entry) => entry[0] === "log" && /Droxy CLI/.test(entry[1])), true);
 });
 
 test("help and version aliases log expected output", async () => {
@@ -87,8 +142,13 @@ test("unknown command prints suggestion and help", async () => {
     process.exitCode = 0;
     await runCli(["stauts"], target.deps);
     assert.equal(process.exitCode, 1);
-    assert.equal(target.calls[0][0], "log");
-    assert.match(target.calls[0][1], /Did you mean \"droxy status\"\?/);
+    const guided = target.calls.find((entry) => entry[0] === "printGuidedError");
+    assert.equal(Boolean(guided), true);
+    assert.match(String(guided[1].what || ""), /Unknown command "stauts"/);
+    assert.equal(
+      Array.isArray(guided[1].next) && guided[1].next.some((step) => /droxy status/.test(step)),
+      true
+    );
     assert.equal(target.calls.some((entry) => /Usage:/.test(entry[1]) || /Droxy CLI/.test(entry[1])), true);
   } finally {
     process.exitCode = previousExitCode;

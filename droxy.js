@@ -2,6 +2,9 @@
 "use strict";
 
 const pkg = require("./package.json");
+const configModule = require("./src/config");
+const interactiveModule = require("./src/flows/interactive");
+const helpersModule = require("./src/helpers");
 const loginModule = require("./src/login");
 const proxyModule = require("./src/proxy");
 const syncModule = require("./src/sync");
@@ -16,7 +19,7 @@ const KNOWN_COMMANDS = [
   "status",
   "login",
   "connect",
-  "droid",
+  "ui",
   "help",
   "version",
 ];
@@ -194,17 +197,26 @@ function printHelp(output = outputModule) {
     "Droxy CLI v0.1.0",
     "",
     "Usage:",
+    "  droxy",
+    "  droxy ui",
     "  droxy start [--quiet]",
     "  droxy stop [--force] [--quiet]",
     "  droxy status [--check] [--json] [--verbose] [--quiet]",
     "  droxy login [provider] [--with-models|--skip-models]",
     "  droxy connect [provider] [--with-models|--skip-models]",
-    "  droxy droid sync [--quiet]",
     "  droxy help",
     "  droxy version",
     "",
+  "Flags:",
+    "  --with-models   Legacy alias; model auto-sync is enabled by default",
+    "  --skip-models   Login only, skip automatic model sync",
+    "",
     "Providers:",
     "  gemini, codex, claude, qwen, kimi, iflow, antigravity",
+    "",
+    "Workflow docs:",
+    "  docs/WORKFLOW.md",
+    "  docs/CLI_STYLE_GUIDE.md",
   ];
 
   for (const line of lines) {
@@ -212,14 +224,49 @@ function printHelp(output = outputModule) {
   }
 }
 
+function printGuided(output, payload) {
+  if (output && typeof output.printGuidedError === "function") {
+    output.printGuidedError(payload);
+    return;
+  }
+  if (output && typeof output.log === "function") {
+    output.log(payload.what || "Error.");
+    if (payload.why) output.log(`Why: ${payload.why}`);
+    if (Array.isArray(payload.next)) {
+      for (const step of payload.next) {
+        output.log(`Next: ${step}`);
+      }
+    }
+  }
+}
+
+function isInteractiveSession(options = {}) {
+  if (typeof options.isInteractiveSession === "function") {
+    return options.isInteractiveSession();
+  }
+  return Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY);
+}
+
 async function runCli(argv = process.argv.slice(2), options = {}) {
+  const config = options.config || configModule;
+  const interactive = options.interactive || interactiveModule;
+  const helpers = options.helpers || helpersModule;
   const proxy = options.proxy || proxyModule;
   const login = options.login || loginModule;
   const sync = options.sync || syncModule;
   const output = options.output || outputModule;
   const version = options.version || pkg.version || "0.1.0";
+  const rawArgs = Array.isArray(argv) ? argv.slice() : [];
 
-  const parsed = parseArgs(argv);
+  if (rawArgs.length === 0) {
+    if (isInteractiveSession(options)) {
+      return interactive.runInteractiveHome();
+    }
+    printHelp(output);
+    return undefined;
+  }
+
+  const parsed = parseArgs(rawArgs);
 
   if (HELP_ALIASES.has(parsed.command)) {
     printHelp(output);
@@ -253,37 +300,112 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
 
   if (parsed.command === "login" || parsed.command === "connect") {
     const skipModels = parsed.hasFlag("--skip-models");
-    const withModels = parsed.hasFlag("--with-models");
-    const selectModels = withModels ? true : skipModels ? false : undefined;
-    return login.loginFlow({
+    const selectModels = skipModels ? false : true;
+    const quiet = parsed.hasFlag("--quiet");
+    const loginResult = await login.loginFlow({
       providerId: parsed.subcommand,
       selectModels,
-      quiet: parsed.hasFlag("--quiet"),
+      quiet,
     });
+    if (loginResult && loginResult.success === false) {
+      return loginResult;
+    }
+    if (skipModels) {
+      return loginResult;
+    }
+    const state =
+      config && typeof config.readState === "function" ? config.readState() || {} : {};
+    const hasPersistedSelection = Array.isArray(state.selectedModels);
+    if (!hasPersistedSelection) {
+      if (!quiet && output && typeof output.printInfo === "function") {
+        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy ui` to choose models.");
+      }
+      return loginResult;
+    }
+    const selectedModels =
+      helpers && typeof helpers.normalizeIdList === "function"
+        ? helpers.normalizeIdList(state.selectedModels)
+        : [];
+    if (!quiet && output && typeof output.printInfo === "function") {
+      output.printInfo("Auto-syncing selected models to Droid...");
+    }
+    const syncResult = await sync.syncDroidSettings({ quiet, selectedModels });
+    if (loginResult && typeof loginResult === "object") {
+      return { ...loginResult, syncResult };
+    }
+    return syncResult;
   }
 
-  if (parsed.command === "droid") {
-    if (parsed.subcommand === "sync") {
-      return sync.syncDroidSettings({ quiet: parsed.hasFlag("--quiet") });
+  if (parsed.command === "ui") {
+    if (isInteractiveSession(options)) {
+      return interactive.runInteractiveHome();
     }
-    output.log("Usage: droxy droid sync [--quiet]");
+    printGuided(output, {
+      what: "Interactive mode requires a TTY terminal.",
+      why: "No interactive stdin/stdout is available in this session.",
+      next: ["Run: droxy help"],
+    });
+    process.exitCode = 1;
     return undefined;
   }
 
   const suggestion = suggestCommand(parsed.command);
   if (suggestion) {
-    output.log(`Unknown command \"${parsed.commandToken}\". Did you mean \"droxy ${suggestion}\"?`);
+    printGuided(output, {
+      what: `Unknown command "${parsed.commandToken}".`,
+      why: "The command is not part of the current MVP command set.",
+      next: [
+        `Did you mean: droxy ${suggestion}`,
+        "Run: droxy help",
+      ],
+    });
   } else {
-    output.log(`Unknown command \"${parsed.commandToken}\". Run \"droxy help\".`);
+    printGuided(output, {
+      what: `Unknown command "${parsed.commandToken}".`,
+      why: "The command is not part of the current MVP command set.",
+      next: ["Run: droxy help"],
+    });
   }
   process.exitCode = 1;
   printHelp(output);
   return undefined;
 }
 
+function classifyErrorGuidance(message) {
+  const text = String(message || "");
+  if (text.includes("Proxy binary not found")) {
+    return {
+      why: "Droxy could not find the proxy engine binary needed for start/login.",
+      next: [
+        "Place cli-proxy-api-plus in vendor/",
+        "or set DROXY_PROXY_BIN to your binary path",
+        "then run: droxy start",
+      ],
+    };
+  }
+  if (text.includes("No provider selected")) {
+    return {
+      why: "Login requires a provider id in non-interactive contexts.",
+      next: [
+        "Run: droxy login claude",
+        "or run without provider in a TTY session to get a prompt",
+      ],
+    };
+  }
+  return {
+    why: "A runtime error interrupted the command.",
+    next: ["Run: droxy help", "Run: droxy status --verbose"],
+  };
+}
+
 function handleCliError(err, { exitOnError = true } = {}) {
   const message = err && err.message ? err.message : String(err || "Unknown error");
-  outputModule.printError(message);
+  const guidance = classifyErrorGuidance(message);
+  outputModule.printGuidedError({
+    what: message,
+    why: guidance.why,
+    next: guidance.next,
+  });
   if (exitOnError) {
     process.exit(1);
   }
@@ -291,6 +413,7 @@ function handleCliError(err, { exitOnError = true } = {}) {
 
 module.exports = {
   handleCliError,
+  isInteractiveSession,
   parseArgs,
   printHelp,
   runCli,

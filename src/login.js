@@ -6,7 +6,12 @@ const { spawn } = require("child_process");
 
 const config = require("./config");
 const proxy = require("./proxy");
-const { log, printInfo, printSuccess, printWarning } = require("./ui/output");
+const {
+  log,
+  printGuidedError,
+  printInfo,
+  printSuccess,
+} = require("./ui/output");
 
 const PROVIDERS = [
   {
@@ -175,9 +180,17 @@ async function runLogin(provider, configPath, options = {}) {
 }
 
 function countConnectedProviders(configValues) {
-  const authDir = config.resolveAuthDir(configValues.authDir || config.DEFAULT_AUTH_DIR);
+  return getProvidersWithConnectionStatus(configValues).filter((provider) => provider.connected);
+}
+
+function getProvidersWithConnectionStatus(configValues) {
+  const values = configValues && typeof configValues === "object" ? configValues : {};
+  const authDir = config.resolveAuthDir(values.authDir || config.DEFAULT_AUTH_DIR);
   const files = listAuthFiles(authDir).map((name) => name.toLowerCase());
-  return PROVIDERS.filter((provider) => hasProviderAuth(provider.id, files));
+  return PROVIDERS.map((provider) => ({
+    ...provider,
+    connected: hasProviderAuth(provider.id, files),
+  }));
 }
 
 async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) {
@@ -194,7 +207,15 @@ async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) 
 
   const ensureResult = await proxy.ensureProxyRunning(configValues, true);
   if (ensureResult && ensureResult.blocked) {
-    printWarning("Port is already in use by another process. Resolve that before login.");
+    printGuidedError({
+      what: "Login blocked because configured port is in use.",
+      why: "A non-Droxy process is listening on the configured proxy port.",
+      next: [
+        "Run: droxy status --verbose",
+        "Run: droxy stop --force (only if you own the process)",
+        "or update host/port in config and retry login",
+      ],
+    });
     return { success: false, reason: "proxy_blocked" };
   }
 
@@ -218,7 +239,7 @@ async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) 
   const connectedProviders = countConnectedProviders(configValues).map((item) => item.id);
 
   if (!quiet && selectModels === true) {
-    printInfo("Model selection menu is not part of this MVP. Use `droxy droid sync` for live model sync.");
+    printInfo("Model sync requested. Droxy will sync detected models to Droid after login.");
   }
 
   return {
@@ -233,6 +254,7 @@ module.exports = {
   AUTH_HINTS,
   PROVIDERS,
   hasProviderAuth,
+  getProvidersWithConnectionStatus,
   listAuthFiles,
   listProvidersText,
   loginFlow,
