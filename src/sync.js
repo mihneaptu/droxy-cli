@@ -992,7 +992,7 @@ function createSyncApi(overrides = {}) {
   }
 
   function warnManagementExclusionFetchFailure(message, err, options = {}) {
-    if (options && options.quiet) return;
+    if (options.quiet) return;
     if (!output || typeof output.printWarning !== "function") return;
 
     const details =
