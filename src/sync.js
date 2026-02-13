@@ -1513,7 +1513,6 @@ function createSyncApi(overrides = {}) {
     const syncedModelIds = normalizeSelectedModelIds(
       detectedEntries.map((entry) => (entry && entry.id ? entry.id : ""))
     );
-    const syncedModelSet = new Set(syncedModelIds.map((modelId) => String(modelId).toLowerCase()));
     const explicitThinkingModelModes = normalizeThinkingModelModes(state.thinkingModelModes || {});
     const fallbackThinkingModelSet = new Set(
       normalizeThinkingModelIds(state.thinkingModels || []).map((modelId) =>
