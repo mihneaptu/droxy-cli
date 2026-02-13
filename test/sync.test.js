@@ -501,6 +501,9 @@ test("fetchAvailableModelEntries falls back to auth-files exclusion when oauth-e
         },
       },
     }),
+    output: {
+      printWarning: () => {},
+    },
   });
 
   const entries = await api.fetchAvailableModelEntries(
@@ -512,6 +515,96 @@ test("fetchAvailableModelEntries falls back to auth-files exclusion when oauth-e
   );
 
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchAvailableModelEntries warns when oauth exclusions fail before auth-files fallback", async () => {
+  const warnings = [];
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 500,
+        body: { error: "proxy unavailable" },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              status_message:
+                "{\"detail\":\"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.\"}",
+            },
+          ],
+        },
+      },
+    }),
+    output: {
+      printWarning: (message) => warnings.push(String(message)),
+    },
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /oauth-excluded-models/i);
+  assert.match(warnings[0], /auth-files/i);
+});
+
+test("fetchAvailableModelEntries warns and continues when management exclusion endpoints fail", async () => {
+  const warnings = [];
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 500,
+        body: { error: "proxy unavailable" },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 500,
+        body: { error: "proxy unavailable" },
+      },
+    }),
+    output: {
+      printWarning: (message) => warnings.push(String(message)),
+    },
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5", "gpt-5.3-codex-spark"]);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /oauth-excluded-models/i);
+  assert.match(warnings[1], /continuing without management exclusions/i);
 });
 
 test("fetchAvailableModelEntries excludes auth-files model IDs when status payload splits hint and model", async () => {
@@ -545,6 +638,9 @@ test("fetchAvailableModelEntries excludes auth-files model IDs when status paylo
         },
       },
     }),
+    output: {
+      printWarning: () => {},
+    },
   });
 
   const entries = await api.fetchAvailableModelEntries(
@@ -587,6 +683,9 @@ test("fetchAvailableModelEntries excludes slash-delimited auth-files model IDs w
         },
       },
     }),
+    output: {
+      printWarning: () => {},
+    },
   });
 
   const entries = await api.fetchAvailableModelEntries(
