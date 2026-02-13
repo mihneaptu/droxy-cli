@@ -13,13 +13,17 @@ test("getProvidersWithConnectionStatus marks providers from auth artifacts", () 
   try {
     fs.writeFileSync(path.join(authDir, "anthropic-session.json"), "{}", "utf8");
     fs.writeFileSync(path.join(authDir, "openai-token.json"), "{}", "utf8");
+    fs.writeFileSync(path.join(authDir, "openai-token-backup.json"), "{}", "utf8");
 
     const rows = login.getProvidersWithConnectionStatus({ authDir });
-    const byId = new Map(rows.map((provider) => [provider.id, provider.connected]));
+    const byId = new Map(rows.map((provider) => [provider.id, provider]));
 
-    assert.equal(byId.get("claude"), true);
-    assert.equal(byId.get("codex"), true);
-    assert.equal(byId.get("gemini"), false);
+    assert.equal(byId.get("claude").connected, true);
+    assert.equal(byId.get("claude").connectionCount, 1);
+    assert.equal(byId.get("codex").connected, true);
+    assert.equal(byId.get("codex").connectionCount, 2);
+    assert.equal(byId.get("gemini").connected, false);
+    assert.equal(byId.get("gemini").connectionCount, 0);
   } finally {
     fs.rmSync(authDir, { recursive: true, force: true });
   }

@@ -82,11 +82,15 @@ function listAuthFiles(authDir) {
   }
 }
 
-function hasProviderAuth(providerId, files) {
+function countProviderAuth(providerId, files) {
   const hints = AUTH_HINTS[providerId] || [providerId];
-  return files.some((name) =>
+  return files.filter((name) =>
     hints.some((hint) => String(name).toLowerCase().includes(String(hint).toLowerCase()))
-  );
+  ).length;
+}
+
+function hasProviderAuth(providerId, files) {
+  return countProviderAuth(providerId, files) > 0;
 }
 
 function resolveProvider(providerId) {
@@ -187,10 +191,14 @@ function getProvidersWithConnectionStatus(configValues) {
   const values = configValues && typeof configValues === "object" ? configValues : {};
   const authDir = config.resolveAuthDir(values.authDir || config.DEFAULT_AUTH_DIR);
   const files = listAuthFiles(authDir).map((name) => name.toLowerCase());
-  return PROVIDERS.map((provider) => ({
-    ...provider,
-    connected: hasProviderAuth(provider.id, files),
-  }));
+  return PROVIDERS.map((provider) => {
+    const connectionCount = countProviderAuth(provider.id, files);
+    return {
+      ...provider,
+      connected: connectionCount > 0,
+      connectionCount,
+    };
+  });
 }
 
 async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) {
@@ -253,6 +261,7 @@ async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) 
 module.exports = {
   AUTH_HINTS,
   PROVIDERS,
+  countProviderAuth,
   hasProviderAuth,
   getProvidersWithConnectionStatus,
   listAuthFiles,
