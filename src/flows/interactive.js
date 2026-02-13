@@ -57,39 +57,6 @@ function createInteractiveApi(overrides = {}) {
     output,
     proxy,
   });
-
-  function readPersistedModelsByProvider(state = {}) {
-    const factory = state && state.factory && typeof state.factory === "object" ? state.factory : {};
-    const byProvider =
-      factory && factory.modelsByProvider && typeof factory.modelsByProvider === "object"
-        ? factory.modelsByProvider
-        : {};
-    const output = {};
-    for (const [providerId, ids] of Object.entries(byProvider)) {
-      const normalizedProviderId = String(providerId || "").trim().toLowerCase();
-      if (!normalizedProviderId) continue;
-      output[normalizedProviderId] = normalizeModelIds(ids);
-    }
-    return output;
-  }
-
-  function resolveSyncedDefaultsForProvider({
-    droidSyncedByProvider = {},
-    persistedByProvider = {},
-    providerGroup,
-  } = {}) {
-    const providerId = providerGroup && providerGroup.id ? providerGroup.id : "";
-    if (!providerId) return [];
-
-    const persistedIds = Array.isArray(persistedByProvider[providerId])
-      ? persistedByProvider[providerId]
-      : [];
-    const droidIds = Array.isArray(droidSyncedByProvider[providerId])
-      ? droidSyncedByProvider[providerId]
-      : [];
-    const sourceIds = persistedIds.length ? persistedIds : droidIds;
-    return normalizeModelIds(sourceIds).filter((modelId) => providerGroup.models.includes(modelId));
-  }
   async function chooseModelsFlow() {
     const spinner = createSpinner("Fetching available models...").start();
     let modelEntries = [];
@@ -126,17 +93,11 @@ function createInteractiveApi(overrides = {}) {
       getConnectedProvidersWithStatus(login, values)
     );
     const syncedModelIdsByProvider = readDroidSyncedModelIdsByProviderFn({ config, sync });
-    const stateAtLoad = config.readState() || {};
-    const persistedByProvider = readPersistedModelsByProvider(stateAtLoad);
     const syncedByProvider = Object.fromEntries(
-      providerGroups.map((group) => {
-        const defaults = resolveSyncedDefaultsForProvider({
-          droidSyncedByProvider: syncedModelIdsByProvider,
-          persistedByProvider,
-          providerGroup: group,
-        });
-        return [group.id, defaults.length];
-      })
+      Object.entries(syncedModelIdsByProvider).map(([providerId, ids]) => [
+        providerId,
+        normalizeModelIds(ids).length,
+      ])
     );
     if (!providerGroups.length) {
       output.printGuidedError({
@@ -158,7 +119,6 @@ function createInteractiveApi(overrides = {}) {
     while (true) {
       const state = config.readState() || {};
       existingSelectedModels = normalizeModelIds(state.selectedModels || []);
-      const stateByProvider = readPersistedModelsByProvider(state);
 
       providerGroup = await promptProviderModelsSelection(
         menu,
@@ -170,11 +130,12 @@ function createInteractiveApi(overrides = {}) {
         return { success: false, reason: "cancelled" };
       }
 
-      const initialSelectedForProvider = resolveSyncedDefaultsForProvider({
-        droidSyncedByProvider: syncedModelIdsByProvider,
-        persistedByProvider: stateByProvider,
-        providerGroup,
-      });
+      const initialSelectedForProvider = normalizeModelIds(
+        (Array.isArray(syncedModelIdsByProvider[providerGroup.id])
+          ? syncedModelIdsByProvider[providerGroup.id]
+          : []
+        ).filter((modelId) => providerGroup.models.includes(modelId))
+      );
       const selection = await promptModelSelection(
         menu,
         providerGroup.models,
@@ -191,8 +152,7 @@ function createInteractiveApi(overrides = {}) {
         existingSelectedModels,
         providerGroup.models,
         selectedForProvider,
-        providerGroup.id,
-        stateByProvider[providerGroup.id] || []
+        providerGroup.id
       );
       break;
     }

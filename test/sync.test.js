@@ -222,23 +222,6 @@ test("splitModelsForFactoryEntries classifies providers", () => {
 
   assert.deepEqual(split.openai, ["gpt-5"]);
   assert.deepEqual(split.anthropic, ["claude-opus", "claude-sonnet"]);
-  assert.deepEqual(split.byProvider, {
-    codex: ["gpt-5"],
-    claude: ["claude-opus", "claude-sonnet"],
-  });
-});
-
-test("splitModelsForFactoryEntries keeps antigravity ownership for gpt-oss while preserving factory compatibility", () => {
-  const split = sync.splitModelsForFactoryEntries([
-    { id: "gpt-oss-120b-medium", owned_by: "antigravity" },
-    { id: "gemini-3-flash", owned_by: "antigravity" },
-  ]);
-
-  assert.deepEqual(split.openai, ["gpt-oss-120b-medium", "gemini-3-flash"]);
-  assert.deepEqual(split.anthropic, []);
-  assert.deepEqual(split.byProvider, {
-    antigravity: ["gemini-3-flash", "gpt-oss-120b-medium"],
-  });
 });
 
 test("filterDetectedEntriesBySelection keeps only explicitly selected models", () => {
@@ -682,9 +665,6 @@ test("syncDroidSettings writes files from provided detected entries without netw
     assert.deepEqual((configRoot.custom_models || []).map((entry) => entry.model), ["gpt-5"]);
     assert.deepEqual((settingsRoot.customModels || []).map((entry) => entry.model), ["gpt-5"]);
     assert.equal(Boolean(updatedState && updatedState.factory), true);
-    assert.deepEqual(updatedState && updatedState.factory && updatedState.factory.modelsByProvider, {
-      codex: ["gpt-5"],
-    });
   } finally {
     cleanup();
   }
@@ -1051,7 +1031,6 @@ test("syncDroidSettings clears stale selection when none of the selected models 
     assert.deepEqual(updatedState && updatedState.selectedModels, []);
     assert.deepEqual(updatedState && updatedState.thinkingModels, []);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, {});
-    assert.deepEqual(updatedState && updatedState.factory && updatedState.factory.modelsByProvider, {});
   } finally {
     cleanup();
   }
@@ -1133,7 +1112,6 @@ test("syncDroidSettings clears Droid models when selection is explicitly empty",
     assert.deepEqual((settingsRoot.customModels || []).map((entry) => entry.model), []);
     assert.deepEqual(updatedState && updatedState.selectedModels, []);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, {});
-    assert.deepEqual(updatedState && updatedState.factory && updatedState.factory.modelsByProvider, {});
     assert.equal(
       Boolean(
         settingsRoot.sessionDefaultSettings &&
