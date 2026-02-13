@@ -2,6 +2,7 @@ name: Feature request
 description: Propose an improvement to droxy-cli
 title: "[feature] "
 labels:
+  - feature
   - enhancement
 body:
   - type: markdown
