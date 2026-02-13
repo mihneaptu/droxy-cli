@@ -16,10 +16,13 @@ const CLAUDE_MICROCOPY = {
   },
   voice: {
     principles: {
-      clarity: "Be explicit about what happened and what changes.",
-      calm: "Keep tone steady, respectful, and low-drama.",
-      actionable: "Always give the next command to recover.",
-      honesty: "Say when something is uncertain instead of pretending certainty.",
+      clarity: "Reduce cognitive load: explain what happened in one concrete sentence.",
+      calm: "Keep tone steady, respectful, and low-drama in every state.",
+      actionable: "Give one immediate next command that restores forward motion.",
+      honesty: "Name uncertainty directly instead of pretending certainty.",
+      thinkingSpace: "Create a clear thinking space by removing noise and urgency.",
+      userInterestFirst: "Frame guidance around the user's goals, not product promotion.",
+      trust: "Build trust with transparent constraints and practical boundaries.",
     },
   },
   trust: {
@@ -246,6 +249,9 @@ const CLAUDE_MICROCOPY = {
     },
   },
   errors: {
+    guidedDefaultWhat: "That step did not complete yet.",
+    guidedFallbackHint: "Droxy could not complete this step yet.",
+    guidedFallbackTry: "Run: droxy help",
     connectionRefused: "Connection refused.",
     connectionRefusedHint: "Is the proxy running?",
     connectionRefusedTry: "Try: droxy start",

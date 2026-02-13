@@ -2,6 +2,7 @@
 
 const { COLORS, colorize } = require("./colors");
 const { ICONS } = require("./animations");
+const { getMessage } = require("./voiceCatalog");
 
 function log(msg = "") {
   process.stdout.write(`${String(msg)}\n`);
@@ -14,7 +15,9 @@ function logCentered(line, width = 56) {
 }
 
 function printSuccess(message) {
-  log(`${colorize(ICONS.success, COLORS.success)} ${message}`);
+  const safeMessage = String(message || "").trim();
+  if (!safeMessage) return;
+  log(`${colorize(ICONS.success, COLORS.success)} ${safeMessage}`);
 }
 
 function normalizeNextSteps(next) {
@@ -25,7 +28,8 @@ function normalizeNextSteps(next) {
 }
 
 function printGuidedError({ what, why = "", next = [] } = {}) {
-  const safeWhat = String(what || "Something went wrong.").trim();
+  const defaultWhat = String(getMessage("errors.guidedDefaultWhat") || "That step did not complete yet.").trim();
+  const safeWhat = String(what || defaultWhat).trim();
   const safeWhy = String(why || "").trim();
   const steps = normalizeNextSteps(next);
 
@@ -46,11 +50,16 @@ function printGuidedError({ what, why = "", next = [] } = {}) {
 }
 
 function printError(message, hint = "", tryCmd = "") {
+  const fallbackHint = String(getMessage("errors.guidedFallbackHint") || "Droxy could not complete this step yet.").trim();
+  const fallbackTry = String(getMessage("errors.guidedFallbackTry") || "Run: droxy help").trim();
+  const safeHint = String(hint || "").trim() || fallbackHint;
+  const safeTryCmd = String(tryCmd || "").trim();
   const next = [];
-  if (tryCmd) next.push(`Run: ${tryCmd}`);
+  if (safeTryCmd) next.push(`Run: ${safeTryCmd}`);
+  else next.push(fallbackTry);
   printGuidedError({
     what: message,
-    why: hint,
+    why: safeHint,
     next,
   });
 }
@@ -63,15 +72,21 @@ function printTeachingError({ what, why = "", context = "", suggestions = [] }) 
 }
 
 function printWarning(message) {
-  log(`${colorize(ICONS.warning, COLORS.warning)} ${message}`);
+  const safeMessage = String(message || "").trim();
+  if (!safeMessage) return;
+  log(`${colorize(ICONS.warning, COLORS.warning)} ${safeMessage}`);
 }
 
 function printInfo(message) {
-  log(`${colorize(ICONS.info, COLORS.info)} ${message}`);
+  const safeMessage = String(message || "").trim();
+  if (!safeMessage) return;
+  log(`${colorize(ICONS.info, COLORS.info)} ${safeMessage}`);
 }
 
 function printNextStep(message) {
-  log(colorize(`  Next: ${message}`, COLORS.dim));
+  const safeMessage = String(message || "").trim();
+  if (!safeMessage) return;
+  log(colorize(`  Next: ${safeMessage}`, COLORS.dim));
 }
 
 function printSmartSuggestion(state) {
