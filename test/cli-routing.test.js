@@ -120,11 +120,11 @@ test("ui command prints migration guidance", async () => {
     await runCli(["ui"], target.deps);
     assert.equal(process.exitCode, 1);
     const guided = target.calls.find((entry) => entry[0] === "printGuidedError");
-    assert.equal(Boolean(guided), true);
+    assert.ok(guided, "printGuidedError should have been called");
     assert.match(String(guided[1].what || ""), /was removed/i);
-    assert.equal(
+    assert.ok(
       Array.isArray(guided[1].next) && guided[1].next.some((step) => /Use: droxy/.test(step)),
-      true
+      "Migration guidance should suggest using 'droxy'"
     );
   } finally {
     process.exitCode = previousExitCode;
