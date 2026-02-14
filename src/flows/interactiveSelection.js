@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const helpers = require("../helpers");
+const thinkingCapabilities = require("../thinkingCapabilities");
 const { COLORS, colorize } = require("../ui/colors");
 const {
   normalizeModelIds,
@@ -14,7 +15,11 @@ const normalizeThinkingMode = helpers.normalizeThinkingMode;
 const normalizeThinkingModelModes = helpers.normalizeThinkingModelModes;
 const stripThinkingSuffix = helpers.stripThinkingSuffix;
 const THINKING_MODE_HISTORY_LIMIT = 5;
-const DEFAULT_THINKING_ALLOWED_MODES = Object.freeze(["auto", "none"]);
+const DEFAULT_THINKING_ALLOWED_MODES = thinkingCapabilities.DEFAULT_THINKING_ALLOWED_MODES;
+const orderThinkingModes = thinkingCapabilities.orderThinkingModes;
+const normalizeAllowedThinkingModes = thinkingCapabilities.normalizeAllowedThinkingModes;
+const buildThinkingCapabilityByModelId = thinkingCapabilities.buildThinkingCapabilityByModelId;
+const resolveThinkingCapabilityForModel = thinkingCapabilities.resolveThinkingCapabilityForModel;
 
 function getProvidersWithStatus(login, configValues) {
   if (login && typeof login.getProvidersWithConnectionStatus === "function") {
@@ -197,100 +202,6 @@ function isLikelyThinkingModelId(modelId) {
   const value = normalizeText(modelId).toLowerCase();
   if (!value) return false;
   return /(^|[-_.])(thinking|reasoning)([-_.]|$)/.test(value);
-}
-
-function orderThinkingModes(modes = []) {
-  const seen = new Set();
-  const output = [];
-  for (const mode of THINKING_MODE_VALUES) {
-    if (!Array.isArray(modes) || !modes.includes(mode) || seen.has(mode)) continue;
-    seen.add(mode);
-    output.push(mode);
-  }
-  for (const mode of Array.isArray(modes) ? modes : []) {
-    const normalized = normalizeThinkingMode(mode);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    output.push(normalized);
-  }
-  return output;
-}
-
-function normalizeAllowedThinkingModes(allowedModes, options = {}) {
-  const includeNone = options.includeNone !== false;
-  const modeSet = new Set();
-  const values = Array.isArray(allowedModes) ? allowedModes : [allowedModes];
-  for (const value of values) {
-    if (typeof value !== "string") continue;
-    const direct = normalizeThinkingMode(value);
-    if (direct) {
-      modeSet.add(direct);
-      continue;
-    }
-    const tokens = value.split(/[\s,;|]+/g);
-    for (const token of tokens) {
-      const normalized = normalizeThinkingMode(token);
-      if (normalized) modeSet.add(normalized);
-    }
-  }
-  modeSet.add("auto");
-  if (includeNone) modeSet.add("none");
-  return orderThinkingModes(Array.from(modeSet));
-}
-
-function normalizeThinkingCapability(capability) {
-  const value = capability && typeof capability === "object" ? capability : {};
-  const verified = value.verified === true;
-  const supported = verified && value.supported === true;
-  if (!verified) {
-    return {
-      supported: false,
-      verified: false,
-      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-    };
-  }
-  if (!supported) {
-    return {
-      supported: false,
-      verified: true,
-      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-    };
-  }
-  const allowedModes = normalizeAllowedThinkingModes(value.allowedModes);
-  const hasAdvancedModes = allowedModes.some((mode) => mode !== "auto" && mode !== "none");
-  if (hasAdvancedModes) {
-    return {
-      supported: true,
-      verified: true,
-      allowedModes,
-    };
-  }
-  return {
-    supported: true,
-    verified: true,
-    allowedModes: orderThinkingModes(THINKING_MODE_VALUES),
-  };
-}
-
-function buildThinkingCapabilityByModelId(modelEntries = []) {
-  const output = {};
-  for (const entry of Array.isArray(modelEntries) ? modelEntries : []) {
-    const modelId = stripThinkingSuffix(entry && entry.id ? entry.id : "").toLowerCase();
-    if (!modelId) continue;
-    output[modelId] = normalizeThinkingCapability(entry.thinking);
-  }
-  return output;
-}
-
-function resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId = {}) {
-  const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
-  if (
-    normalizedModelId &&
-    Object.prototype.hasOwnProperty.call(thinkingCapabilityByModelId, normalizedModelId)
-  ) {
-    return normalizeThinkingCapability(thinkingCapabilityByModelId[normalizedModelId]);
-  }
-  return normalizeThinkingCapability(null);
 }
 
 function getAllowedThinkingModesForModel(

@@ -8,6 +8,7 @@ const path = require("path");
 
 const configModule = require("./config");
 const helpersModule = require("./helpers");
+const thinkingCapabilities = require("./thinkingCapabilities");
 const outputModule = require("./ui/output");
 
 const DROXY_FACTORY_PREFIX = "Droxy • ";
@@ -160,7 +161,6 @@ const RESTRICTED_STATUS_VALUES = new Set([
   "subscription_required",
   "unavailable",
 ]);
-const DEFAULT_THINKING_ALLOWED_MODES = Object.freeze(["auto", "none"]);
 const MANAGEMENT_AUTH_FILES_PATH = "/v0/management/auth-files";
 const MANAGEMENT_OAUTH_EXCLUDED_MODELS_PATH = "/v0/management/oauth-excluded-models";
 const UNSUPPORTED_MODEL_HINTS = Object.freeze([
@@ -411,99 +411,50 @@ function createSyncApi(overrides = {}) {
     typeof helpers.isAdvancedThinkingMode === "function"
       ? helpers.isAdvancedThinkingMode
       : helpersModule.isAdvancedThinkingMode;
-  const THINKING_MODE_VALUES = Array.isArray(helpers.THINKING_MODE_VALUES)
-    ? helpers.THINKING_MODE_VALUES
-    : Array.isArray(helpersModule.THINKING_MODE_VALUES)
-      ? helpersModule.THINKING_MODE_VALUES
-      : ["auto", "minimal", "low", "medium", "high", "xhigh", "none"];
+  const DEFAULT_THINKING_ALLOWED_MODES = thinkingCapabilities.DEFAULT_THINKING_ALLOWED_MODES;
+  const THINKING_MODE_VALUES = thinkingCapabilities.THINKING_MODE_VALUES;
+  const normalizeAllowedThinkingModesShared = thinkingCapabilities.normalizeAllowedThinkingModes;
+  const normalizeThinkingCapabilityShared = thinkingCapabilities.normalizeThinkingCapability;
+  const buildThinkingCapabilityByModelIdShared = thinkingCapabilities.buildThinkingCapabilityByModelId;
+  const resolveThinkingCapabilityForModelShared =
+    thinkingCapabilities.resolveThinkingCapabilityForModel;
+  const thinkingCapabilityOptions = {
+    normalizeThinkingMode,
+    stripThinkingSuffix,
+    thinkingModeValues: THINKING_MODE_VALUES,
+    defaultAllowedModes: DEFAULT_THINKING_ALLOWED_MODES,
+  };
+
+  function normalizeAllowedThinkingModes(value, options = {}) {
+    return normalizeAllowedThinkingModesShared(value, {
+      ...thinkingCapabilityOptions,
+      ...options,
+    });
+  }
+
+  function normalizeThinkingCapability(value, options = {}) {
+    return normalizeThinkingCapabilityShared(value, {
+      ...thinkingCapabilityOptions,
+      ...options,
+    });
+  }
+
+  function buildThinkingCapabilityByModelId(entries) {
+    return buildThinkingCapabilityByModelIdShared(entries, thinkingCapabilityOptions);
+  }
+
+  function resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId = {}) {
+    return resolveThinkingCapabilityForModelShared(
+      modelId,
+      thinkingCapabilityByModelId,
+      thinkingCapabilityOptions
+    );
+  }
 
   function normalizeThinkingModelIds(thinkingModels) {
     return normalizeSelectedModelIds(thinkingModels)
       .map((modelId) => stripThinkingSuffix(modelId))
       .filter(Boolean);
-  }
-
-  function orderThinkingModes(modes) {
-    const modeSet = new Set();
-    for (const mode of Array.isArray(modes) ? modes : []) {
-      const normalized = normalizeThinkingMode(mode);
-      if (!normalized) continue;
-      modeSet.add(normalized);
-    }
-    const ordered = [];
-    for (const mode of THINKING_MODE_VALUES) {
-      if (!modeSet.has(mode)) continue;
-      ordered.push(mode);
-      modeSet.delete(mode);
-    }
-    return ordered.concat(Array.from(modeSet).sort((left, right) => left.localeCompare(right)));
-  }
-
-  function collectThinkingModesFromHint(value, outputModes, depth = 0) {
-    if (depth > 6 || value === undefined || value === null) return;
-    if (Array.isArray(value)) {
-      for (const entry of value) {
-        collectThinkingModesFromHint(entry, outputModes, depth + 1);
-      }
-      return;
-    }
-    if (typeof value === "string") {
-      const directMode = normalizeThinkingMode(value);
-      if (directMode) {
-        outputModes.add(directMode);
-      } else {
-        const splitTokens = value.split(/[\s,;|]+/g);
-        for (const token of splitTokens) {
-          const tokenMode = normalizeThinkingMode(token);
-          if (tokenMode) outputModes.add(tokenMode);
-        }
-      }
-      return;
-    }
-    if (!value || typeof value !== "object") return;
-
-    for (const key of [
-      "modes",
-      "mode",
-      "allowed_modes",
-      "allowedModes",
-      "supported_modes",
-      "supportedModes",
-      "values",
-      "options",
-      "available_modes",
-      "availableModes",
-    ]) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-      collectThinkingModesFromHint(value[key], outputModes, depth + 1);
-    }
-
-    let sawModeKeys = false;
-    for (const [key, flag] of Object.entries(value)) {
-      const modeFromKey = normalizeThinkingMode(key);
-      if (!modeFromKey) continue;
-      sawModeKeys = true;
-      const denied = parseDenyHint(flag);
-      if (denied === true) continue;
-      outputModes.add(modeFromKey);
-    }
-    if (sawModeKeys) return;
-
-    for (const nested of Object.values(value)) {
-      if (typeof nested === "string" || Array.isArray(nested) || (nested && typeof nested === "object")) {
-        collectThinkingModesFromHint(nested, outputModes, depth + 1);
-      }
-    }
-  }
-
-  function normalizeAllowedThinkingModes(value, options = {}) {
-    const includeAuto = options.includeAuto !== false;
-    const includeNone = options.includeNone !== false;
-    const modes = new Set();
-    collectThinkingModesFromHint(value, modes);
-    if (includeAuto) modes.add("auto");
-    if (includeNone) modes.add("none");
-    return orderThinkingModes(Array.from(modes));
   }
 
   function parseThinkingSupportState(value) {
@@ -541,46 +492,6 @@ function createSyncApi(overrides = {}) {
     return null;
   }
 
-  function normalizeThinkingCapability(value) {
-    if (!value || typeof value !== "object") {
-      return {
-        supported: false,
-        verified: false,
-        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-      };
-    }
-
-    const verified = value.verified === true;
-    if (!verified) {
-      return {
-        supported: false,
-        verified: false,
-        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-      };
-    }
-
-    const supportState = parseThinkingSupportState(value.supported);
-    if (supportState === false) {
-      return {
-        supported: false,
-        verified: true,
-        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-      };
-    }
-
-    let allowedModes = normalizeAllowedThinkingModes(value.allowedModes);
-    const advancedModes = allowedModes.filter((mode) => mode !== "auto" && mode !== "none");
-    if (supportState === true && !advancedModes.length) {
-      allowedModes = orderThinkingModes(THINKING_MODE_VALUES);
-    }
-
-    return {
-      supported: supportState === true || advancedModes.length > 0,
-      verified: true,
-      allowedModes: allowedModes.length ? allowedModes : DEFAULT_THINKING_ALLOWED_MODES.slice(),
-    };
-  }
-
   function extractThinkingCapability(item) {
     if (!item || typeof item !== "object") {
       return normalizeThinkingCapability(null);
@@ -594,66 +505,38 @@ function createSyncApi(overrides = {}) {
     const supportStateFromStatus = parseThinkingSupportState(statusHint);
     const supportState =
       supportStateDirect !== null ? supportStateDirect : supportStateFromStatus;
-    let allowedModes = normalizeAllowedThinkingModes(modesHint);
-    const advancedModes = allowedModes.filter((mode) => mode !== "auto" && mode !== "none");
+    const hasExplicitModesHint = modesHint !== undefined;
 
     if (supportState === false) {
-      return {
-        supported: false,
+      return normalizeThinkingCapability({
         verified: true,
-        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-      };
+        supported: false,
+      });
+    }
+
+    if (hasExplicitModesHint) {
+      return normalizeThinkingCapability({
+        verified: true,
+        supported: true,
+        allowedModes: modesHint,
+      });
     }
 
     if (supportState === true) {
-      if (!advancedModes.length) {
-        allowedModes = orderThinkingModes(THINKING_MODE_VALUES);
-      }
-      return {
-        supported: true,
-        verified: true,
-        allowedModes,
-      };
+      return normalizeThinkingCapability(
+        {
+          verified: true,
+          supported: true,
+        },
+        { thinkingModeValues: THINKING_MODE_VALUES }
+      );
     }
 
-    if (advancedModes.length) {
-      return {
-        supported: true,
-        verified: true,
-        allowedModes,
-      };
-    }
-
-    return {
-      supported: false,
+    return normalizeThinkingCapability({
       verified: false,
-      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-    };
-  }
-
-  function buildThinkingCapabilityByModelId(entries) {
-    const outputByModelId = {};
-    for (const entry of Array.isArray(entries) ? entries : []) {
-      const modelId = stripThinkingSuffix(entry && entry.id ? entry.id : "").toLowerCase();
-      if (!modelId) continue;
-      outputByModelId[modelId] = normalizeThinkingCapability(entry.thinking || {});
-    }
-    return outputByModelId;
-  }
-
-  function resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId = {}) {
-    const normalizedId = stripThinkingSuffix(modelId).toLowerCase();
-    if (
-      normalizedId &&
-      Object.prototype.hasOwnProperty.call(thinkingCapabilityByModelId, normalizedId)
-    ) {
-      return normalizeThinkingCapability(thinkingCapabilityByModelId[normalizedId]);
-    }
-    return {
       supported: false,
-      verified: false,
       allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
-    };
+    });
   }
 
   function resolveThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId = {}) {

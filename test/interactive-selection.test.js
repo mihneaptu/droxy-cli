@@ -7,6 +7,7 @@ const path = require("path");
 const test = require("node:test");
 
 const {
+  buildThinkingCapabilityByModelId,
   normalizeThinkingModelModeHistory,
   promptThinkingModelModes,
   readDroidSyncedModelsByProvider,
@@ -254,6 +255,47 @@ test("resolveThinkingModels prefers backend-verified thinking support when avail
   );
 
   assert.deepEqual(models, ["gpt-5"]);
+});
+
+test("buildThinkingCapabilityByModelId keeps explicit non-advanced backend mode lists", () => {
+  const byModelId = buildThinkingCapabilityByModelId([
+    {
+      id: "gpt-5",
+      thinking: {
+        verified: true,
+        supported: true,
+        allowedModes: ["auto"],
+      },
+    },
+  ]);
+
+  assert.deepEqual(byModelId["gpt-5"], {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "none"],
+  });
+});
+
+test("buildThinkingCapabilityByModelId parses mode maps with allow semantics", () => {
+  const byModelId = buildThinkingCapabilityByModelId([
+    {
+      id: "gpt-5",
+      thinking: {
+        verified: true,
+        supported: true,
+        allowedModes: {
+          medium: true,
+          high: false,
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(byModelId["gpt-5"], {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "medium", "none"],
+  });
 });
 
 test("resolveThinkingModelModes keeps saved mode and defaults missing mode to medium", () => {
