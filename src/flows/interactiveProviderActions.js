@@ -13,15 +13,30 @@ function createInteractiveProviderActions({
   now,
   output,
   proxy,
+  sync,
 }) {
-  function readProviderStatuses() {
+  async function readProviderStatuses() {
     config.ensureConfig();
     const configValues = config.readConfigValues();
-    return getProvidersWithStatus(login, configValues);
+    const state = config.readState() || {};
+    let providerStatusById = {};
+    if (sync && typeof sync.fetchProviderConnectionStatusSafe === "function") {
+      const status = await sync.fetchProviderConnectionStatusSafe(configValues, {
+        state,
+        quiet: true,
+      });
+      if (status && status.byProvider && typeof status.byProvider === "object") {
+        providerStatusById = status.byProvider;
+      }
+    }
+    return getProvidersWithStatus(login, {
+      ...configValues,
+      providerStatusById,
+    });
   }
 
   async function connectProviderFlow() {
-    const providers = readProviderStatuses();
+    const providers = await readProviderStatuses();
     const provider = await promptProviderSelection(menu, providers);
     if (!provider) {
       output.printInfo("Provider selection cancelled.");
@@ -48,7 +63,7 @@ function createInteractiveProviderActions({
   async function accountsFlow() {
     let exitAccountsMenu = false;
     while (!exitAccountsMenu) {
-      const providers = readProviderStatuses();
+      const providers = await readProviderStatuses();
       if (!providers.length) {
         output.printWarning("No providers available for account management.");
         return { success: false, reason: "no_providers" };

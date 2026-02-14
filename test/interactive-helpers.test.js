@@ -8,7 +8,7 @@ const {
   mergeProviderModelSelection,
 } = require("../src/flows/interactiveHelpers");
 
-test("buildProviderModelGroups groups known providers and drops unknown models", () => {
+test("buildProviderModelGroups groups only explicitly attributed provider models", () => {
   const groups = buildProviderModelGroups(
     [
       { id: "claude-opus", provider: "anthropic" },
@@ -26,7 +26,6 @@ test("buildProviderModelGroups groups known providers and drops unknown models",
   assert.deepEqual(groups.map((group) => group.id), ["claude", "codex", "qwen"]);
   assert.deepEqual(groups[0].models, ["claude-opus"]);
   assert.deepEqual(groups[1].models, ["gpt-5"]);
-  assert.equal(groups.some((group) => group.models.includes("mystery-model")), false);
 });
 
 test("buildProviderModelGroups prefers explicit provider metadata over model-id family", () => {
@@ -55,7 +54,7 @@ test("buildProviderModelGroups prefers explicit provider metadata over model-id 
   assert.equal(Array.isArray(byId.get("codex")) ? byId.get("codex").length : 0, 0);
 });
 
-test("buildProviderModelGroups falls back to model-id family when metadata is missing", () => {
+test("buildProviderModelGroups hides metadata-missing models", () => {
   const groups = buildProviderModelGroups(
     [
       { id: "gpt-5.1-codex" },
@@ -67,9 +66,7 @@ test("buildProviderModelGroups falls back to model-id family when metadata is mi
     ]
   );
 
-  const byId = new Map(groups.map((group) => [group.id, group.models]));
-  assert.deepEqual(byId.get("claude"), ["claude-opus-4-5-thinking"]);
-  assert.deepEqual(byId.get("codex"), ["gpt-5.1-codex"]);
+  assert.deepEqual(groups, []);
 });
 
 test("buildProviderModelGroups keeps gpt-oss antigravity models in antigravity group", () => {
@@ -106,14 +103,14 @@ test("mergeProviderModelSelection replaces only selected provider segment", () =
   assert.deepEqual(merged, ["claude-sonnet", "gpt-5"]);
 });
 
-test("mergeProviderModelSelection drops stale provider ids when clearing a provider", () => {
+test("mergeProviderModelSelection keeps unclassified stale ids when clearing a provider", () => {
   const merged = mergeProviderModelSelection(
     ["claude-opus-legacy", "gpt-5"],
     ["claude-opus-4-5"],
     [],
     "claude"
   );
-  assert.deepEqual(merged, ["gpt-5"]);
+  assert.deepEqual(merged, ["claude-opus-legacy", "gpt-5"]);
 });
 
 test("mergeProviderModelSelection drops persisted provider models even when hints mismatch provider id", () => {

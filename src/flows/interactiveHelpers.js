@@ -27,24 +27,15 @@ function normalizeProviderHint(value) {
 function resolveProviderFromHint(value) {
   const normalized = normalizeProviderHint(value);
   if (!normalized) return "";
-  if (normalized === "anthropic" || normalized.includes("claude")) return "claude";
-  if (normalized === "openai" || normalized.includes("codex")) return "codex";
-  if (
-    normalized === "gpt" ||
-    normalized.startsWith("gpt-") ||
-    normalized.startsWith("o1") ||
-    normalized.startsWith("o3") ||
-    normalized.startsWith("o4")
-  ) {
-    return "codex";
-  }
-  if (normalized === "google" || normalized.includes("gemini") || normalized.includes("aistudio")) {
+  if (normalized === "anthropic" || normalized === "claude") return "claude";
+  if (normalized === "openai" || normalized === "codex") return "codex";
+  if (normalized === "google" || normalized === "gemini" || normalized === "aistudio") {
     return "gemini";
   }
-  if (normalized.includes("qwen")) return "qwen";
-  if (normalized.includes("kimi") || normalized.includes("moonshot")) return "kimi";
-  if (normalized.includes("iflow")) return "iflow";
-  if (normalized.includes("antigravity")) return "antigravity";
+  if (normalized === "qwen") return "qwen";
+  if (normalized === "kimi" || normalized === "moonshot") return "kimi";
+  if (normalized === "iflow") return "iflow";
+  if (normalized === "antigravity") return "antigravity";
   return "";
 }
 
@@ -131,10 +122,6 @@ function resolveProviderForModelEntry(entry) {
   const fromOwnerMetadata = resolveProviderFromEntryOwnerMetadata(entry);
   if (fromOwnerMetadata) return fromOwnerMetadata;
 
-  const modelId = extractModelIdFromEntry(entry);
-  const fromModelId = resolveProviderFromHint(modelId);
-  if (fromModelId) return fromModelId;
-
   return resolveProviderFromEntryProviderMetadata(entry);
 }
 
@@ -148,6 +135,18 @@ function buildProviderModelGroups(entries, providerStatuses) {
       id,
       label: normalizeText(provider.label) || id,
       connected: provider.connected === true,
+      connectionState:
+        provider && provider.connectionState === "connected"
+          ? "connected"
+          : provider && provider.connectionState === "disconnected"
+            ? "disconnected"
+            : provider && Object.prototype.hasOwnProperty.call(provider, "connected")
+              ? provider.connected === true
+                ? "connected"
+                : "disconnected"
+            : provider && provider.connected === true
+              ? "connected"
+              : "unknown",
       models: [],
     });
   }
@@ -161,12 +160,6 @@ function buildProviderModelGroups(entries, providerStatuses) {
       if (providerMap.has(explicitProviderId)) {
         providerMap.get(explicitProviderId).models.push(modelId);
       }
-      continue;
-    }
-
-    const providerFromHint = resolveProviderFromHint(modelId);
-    if (providerFromHint && providerMap.has(providerFromHint)) {
-      providerMap.get(providerFromHint).models.push(modelId);
     }
   }
 
@@ -186,18 +179,6 @@ function buildProviderModelGroups(entries, providerStatuses) {
   return connected.concat(disconnected);
 }
 
-function resolveProviderForSelection(providerId, providerModels, selectedWithinProvider) {
-  const explicit = normalizeProviderHint(providerId);
-  if (explicit) return explicit;
-
-  const candidates = normalizeModelIds(providerModels).concat(normalizeModelIds(selectedWithinProvider));
-  for (const modelId of candidates) {
-    const resolved = resolveProviderFromHint(modelId);
-    if (resolved) return resolved;
-  }
-  return "";
-}
-
 function mergeProviderModelSelection(
   existingSelection,
   providerModels,
@@ -208,16 +189,10 @@ function mergeProviderModelSelection(
   const existing = normalizeModelIds(existingSelection);
   const providerSet = new Set(normalizeModelIds(providerModels));
   const persistedProviderSet = new Set(normalizeModelIds(persistedProviderModels));
-  const targetProviderId = resolveProviderForSelection(
-    providerId,
-    providerModels,
-    selectedWithinProvider
-  );
   const remainder = existing.filter((modelId) => {
     if (providerSet.has(modelId)) return false;
     if (persistedProviderSet.has(modelId)) return false;
-    if (!targetProviderId) return true;
-    return resolveProviderFromHint(modelId) !== targetProviderId;
+    return true;
   });
   return normalizeModelIds(remainder.concat(selectedWithinProvider));
 }

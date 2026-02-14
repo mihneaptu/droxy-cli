@@ -213,6 +213,40 @@ test("getDroidManagedPaths uses DROXY_FACTORY_DIR override", () => {
   }
 });
 
+test("isDroxyManagedEntry requires base_url match and ignores Droxy name prefix alone", () => {
+  assert.equal(
+    sync.isDroxyManagedEntry(
+      {
+        displayName: "Droxy • gpt-5",
+        baseUrl: "https://example.com",
+      },
+      "127.0.0.1",
+      8317
+    ),
+    false
+  );
+  assert.equal(
+    sync.isDroxyManagedEntry(
+      {
+        model_display_name: "Droxy • gpt-5",
+      },
+      "127.0.0.1",
+      8317
+    ),
+    false
+  );
+  assert.equal(
+    sync.isDroxyManagedEntry(
+      {
+        base_url: "http://127.0.0.1:8317/v1",
+      },
+      "127.0.0.1",
+      8317
+    ),
+    true
+  );
+});
+
 test("splitModelsForFactoryEntries classifies providers", () => {
   const split = sync.splitModelsForFactoryEntries([
     { id: "gpt-5", provider: "openai" },
@@ -743,6 +777,66 @@ test("fetchAvailableModelEntries uses plaintext management key from state when c
   );
 
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchProviderConnectionStatus reads verified provider connection states from auth-files endpoint", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            { provider: "openai", connected: true },
+            { provider: "anthropic", authenticated: false },
+            { provider: "qwen", status: "connected" },
+          ],
+        },
+      },
+    }),
+  });
+
+  const status = await api.fetchProviderConnectionStatus(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(status.providersState, "verified");
+  assert.equal(status.providersConnected, 2);
+  assert.deepEqual(status.byProvider, {
+    codex: { connected: true, connectionState: "connected", verified: true },
+    claude: { connected: false, connectionState: "disconnected", verified: true },
+    qwen: { connected: true, connectionState: "connected", verified: true },
+  });
+});
+
+test("fetchProviderConnectionStatusSafe returns unknown when management key is unavailable", async () => {
+  const api = sync.createSyncApi({
+    config: {
+      readState: () => ({}),
+    },
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: { files: [{ provider: "openai", connected: true }] },
+      },
+    }),
+  });
+  const status = await api.fetchProviderConnectionStatusSafe({
+    host: "127.0.0.1",
+    port: 8317,
+    tlsEnabled: false,
+    managementKey: "",
+  });
+  assert.deepEqual(status, {
+    providersState: "unknown",
+    providersConnected: 0,
+    byProvider: {},
+  });
 });
 
 test("syncDroidSettings writes files from provided detected entries without network probe", async () => {

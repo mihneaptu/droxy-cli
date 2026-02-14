@@ -132,7 +132,9 @@ Typical fields:
 - `config`
 - `pid`
 - `uptime`
-- `providers` (connected provider count)
+- `providers` (legacy compatibility field; same value as `providersConnected`)
+- `providersConnected` (verified connected provider count)
+- `providersState` (`verified` or `unknown`)
 
 ## Environment Variables
 

@@ -7,10 +7,13 @@ const path = require("path");
 const test = require("node:test");
 
 const {
+  normalizeThinkingModelModeHistory,
   promptThinkingModelModes,
   readDroidSyncedModelsByProvider,
+  resolveThinkingModeFromHistory,
   resolveThinkingModelModes,
   resolveThinkingModels,
+  updateThinkingModelModeHistory,
 } = require("../src/flows/interactiveSelection");
 
 test("readDroidSyncedModelsByProvider reads Droxy-managed models from Droid files", () => {
@@ -80,7 +83,7 @@ test("readDroidSyncedModelsByProvider reads Droxy-managed models from Droid file
   }
 });
 
-test("readDroidSyncedModelsByProvider falls back to model id when provider tag is generic", () => {
+test("readDroidSyncedModelsByProvider trusts explicit provider metadata over model-id family", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "droxy-interactive-selection-"));
   try {
     const settingsPath = path.join(tempDir, "settings.json");
@@ -114,8 +117,44 @@ test("readDroidSyncedModelsByProvider falls back to model id when provider tag i
       },
     });
 
-    assert.equal(counts.gemini, 1);
-    assert.equal(counts.codex || 0, 0);
+    assert.equal(counts.codex, 1);
+    assert.equal(counts.gemini || 0, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("readDroidSyncedModelsByProvider returns empty when managed-entry detector is unavailable", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "droxy-interactive-selection-"));
+  try {
+    const settingsPath = path.join(tempDir, "settings.json");
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          customModels: [
+            {
+              model: "gpt-5",
+              provider: "openai",
+              displayName: "Droxy • gpt-5",
+              baseUrl: "http://127.0.0.1:8317/v1",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    const counts = readDroidSyncedModelsByProvider({
+      config: {
+        readConfigValues: () => ({ host: "127.0.0.1", port: 8317 }),
+      },
+      sync: {
+        getDroidManagedPaths: () => [settingsPath],
+      },
+    });
+    assert.deepEqual(counts, {});
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -245,4 +284,38 @@ test("promptThinkingModelModes exposes full thinking mode menu", async () => {
     "Xhigh",
     "None",
   ]);
+});
+
+test("normalizeThinkingModelModeHistory dedupes valid modes and drops invalid entries", () => {
+  const history = normalizeThinkingModelModeHistory({
+    "gpt-5": ["high", "invalid", "high", "none", "low"],
+    "": ["medium"],
+    "claude-opus": "medium",
+  });
+
+  assert.deepEqual(history, {
+    "gpt-5": ["high", "low"],
+    "claude-opus": ["medium"],
+  });
+});
+
+test("updateThinkingModelModeHistory prepends mode and keeps capped unique history", () => {
+  const history = updateThinkingModelModeHistory(
+    { "gpt-5": ["high", "medium", "low", "minimal", "auto"] },
+    "gpt-5",
+    "medium"
+  );
+  const next = updateThinkingModelModeHistory(history, "gpt-5", "xhigh");
+
+  assert.deepEqual(next, {
+    "gpt-5": ["xhigh", "medium", "high", "low", "minimal"],
+  });
+});
+
+test("resolveThinkingModeFromHistory returns most recent saved mode", () => {
+  const mode = resolveThinkingModeFromHistory(
+    { "gpt-5": ["low", "high"] },
+    "gpt-5"
+  );
+  assert.equal(mode, "low");
 });

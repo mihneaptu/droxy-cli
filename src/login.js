@@ -187,16 +187,76 @@ function countConnectedProviders(configValues) {
   return getProvidersWithConnectionStatus(configValues).filter((provider) => provider.connected);
 }
 
+function normalizeConnectionState(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "connected") return "connected";
+  if (normalized === "disconnected") return "disconnected";
+  return "unknown";
+}
+
+function resolveProviderStatusOverride(configValues, providerId) {
+  if (!configValues || typeof configValues !== "object") {
+    return { connectionState: "unknown", connectionCount: 0, verified: false };
+  }
+  const overrides =
+    configValues.providerStatusById && typeof configValues.providerStatusById === "object"
+      ? configValues.providerStatusById
+      : {};
+  const value = overrides[providerId];
+  if (value === undefined || value === null) {
+    return { connectionState: "unknown", connectionCount: 0, verified: false };
+  }
+  if (typeof value === "boolean") {
+    return {
+      connectionState: value ? "connected" : "disconnected",
+      connectionCount: value ? 1 : 0,
+      verified: true,
+    };
+  }
+  if (typeof value === "string") {
+    const connectionState = normalizeConnectionState(value);
+    return {
+      connectionState,
+      connectionCount: connectionState === "connected" ? 1 : 0,
+      verified: connectionState !== "unknown",
+    };
+  }
+  if (typeof value === "object") {
+    const connectionState = normalizeConnectionState(
+      value.connectionState ||
+      value.status ||
+      value.state ||
+      (
+        value.connected === true
+          ? "connected"
+          : value.connected === false
+            ? "disconnected"
+            : "unknown"
+      )
+    );
+    const countRaw = Number(value.connectionCount || value.count || 0);
+    const connectionCount =
+      connectionState === "connected"
+        ? Math.max(1, Number.isFinite(countRaw) ? Math.floor(countRaw) : 1)
+        : 0;
+    return {
+      connectionState,
+      connectionCount,
+      verified: value.verified === true || connectionState !== "unknown",
+    };
+  }
+  return { connectionState: "unknown", connectionCount: 0, verified: false };
+}
+
 function getProvidersWithConnectionStatus(configValues) {
-  const values = configValues && typeof configValues === "object" ? configValues : {};
-  const authDir = config.resolveAuthDir(values.authDir || config.DEFAULT_AUTH_DIR);
-  const files = listAuthFiles(authDir).map((name) => name.toLowerCase());
   return PROVIDERS.map((provider) => {
-    const connectionCount = countProviderAuth(provider.id, files);
+    const status = resolveProviderStatusOverride(configValues, provider.id);
     return {
       ...provider,
-      connected: connectionCount > 0,
-      connectionCount,
+      connected: status.connectionState === "connected",
+      connectionCount: status.connectionCount,
+      connectionState: status.connectionState,
+      verified: status.verified,
     };
   });
 }
@@ -244,7 +304,9 @@ async function loginFlow({ providerId = "", selectModels, quiet = false } = {}) 
 
   config.updateState(patch);
 
-  const connectedProviders = countConnectedProviders(configValues).map((item) => item.id);
+  const connectedProviders = Array.from(
+    new Set([provider.id].concat(countConnectedProviders(configValues).map((item) => item.id)))
+  );
 
   if (!quiet && selectModels === true) {
     printInfo("Model sync requested. Droxy will sync detected models to Droid after login.");
