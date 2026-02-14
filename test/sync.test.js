@@ -355,6 +355,35 @@ test("fetchAvailableModelEntries allows models with unknown entitlement metadata
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5-mini"]);
 });
 
+test("fetchAvailableModelEntries normalizes backend thinking capability metadata", async () => {
+  const api = sync.createSyncApi({
+    http: createRequestMock({
+      data: [
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            allowed_modes: ["high", "medium"],
+          },
+        },
+      ],
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    { protocolResolution: { reachable: true, protocol: "http" }, state: {} }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "medium", "high", "none"],
+  });
+});
+
 test("fetchAvailableModelEntries filters models with restricted status hints", async () => {
   const api = sync.createSyncApi({
     http: createRequestMock({
@@ -1241,7 +1270,15 @@ test("syncDroidSettings writes thinking suffix variants for selected thinking mo
       quiet: true,
       selectedModels: ["gpt-5", "claude-opus"],
       detectedEntries: [
-        { id: "gpt-5", provider: "openai" },
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "medium", "high", "none"],
+          },
+        },
         { id: "claude-opus", provider: "anthropic" },
       ],
       protocol: "http",
@@ -1269,6 +1306,7 @@ test("syncDroidSettings writes thinking suffix variants for selected thinking mo
     ]);
     assert.deepEqual(updatedState && updatedState.thinkingModels, ["gpt-5"]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "gpt-5": "medium" });
+    assert.equal(updatedState && updatedState.thinkingState, "unknown");
   } finally {
     cleanup();
   }
@@ -1314,7 +1352,17 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
     const result = await api.syncDroidSettings({
       quiet: true,
       selectedModels: ["gpt-5"],
-      detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+      detectedEntries: [
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "medium", "high", "none"],
+          },
+        },
+      ],
       protocol: "http",
     });
 
@@ -1332,6 +1380,7 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
       "gpt-5(high)",
     ]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "gpt-5": "high" });
+    assert.equal(updatedState && updatedState.thinkingState, "verified");
   } finally {
     cleanup();
   }
@@ -1377,7 +1426,17 @@ test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt
     const result = await api.syncDroidSettings({
       quiet: true,
       selectedModels: ["openai/gpt-5"],
-      detectedEntries: [{ id: "openai/gpt-5", provider: "openai" }],
+      detectedEntries: [
+        {
+          id: "openai/gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "medium", "high", "none"],
+          },
+        },
+      ],
       protocol: "http",
     });
 
@@ -1397,12 +1456,13 @@ test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, {
       "openai/gpt-5": "high",
     });
+    assert.equal(updatedState && updatedState.thinkingState, "verified");
   } finally {
     cleanup();
   }
 });
 
-test("syncDroidSettings falls back unsupported advanced thinking modes to auto", async () => {
+test("syncDroidSettings downgrades unverified advanced thinking modes to auto", async () => {
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
@@ -1461,6 +1521,57 @@ test("syncDroidSettings falls back unsupported advanced thinking modes to auto",
     ]);
     assert.deepEqual(updatedState && updatedState.thinkingModels, ["claude-opus"]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "claude-opus": "auto" });
+    assert.equal(updatedState && updatedState.thinkingState, "unknown");
+  } finally {
+    cleanup();
+  }
+});
+
+test("syncDroidSettings emits a thinking downgrade warning when backend capability is unverified", async () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    const downgradeWarnings = [];
+    const api = sync.createSyncApi({
+      config: {
+        DEFAULT_PORT: 8317,
+        configExists: () => true,
+        ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+        readConfigValues: () => ({
+          host: "127.0.0.1",
+          port: 8317,
+          tlsEnabled: false,
+          apiKey: "k",
+        }),
+        readState: () => ({
+          apiKey: "k",
+          thinkingModels: ["gpt-5"],
+          thinkingModelModes: { "gpt-5": "high" },
+        }),
+        updateState: (patch) => patch,
+      },
+      output: {
+        printGuidedError: () => {},
+        printSuccess: () => {},
+        printWarning: () => {},
+        printThinkingModeDowngrade: (payload) => downgradeWarnings.push(payload),
+      },
+    });
+
+    const result = await api.syncDroidSettings({
+      quiet: false,
+      selectedModels: ["gpt-5"],
+      detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+      protocol: "http",
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(downgradeWarnings.length, 1);
+    assert.deepEqual(downgradeWarnings[0], {
+      modelId: "gpt-5",
+      requestedMode: "high",
+      fallbackMode: "auto",
+      reason: "backend_unverified",
+    });
   } finally {
     cleanup();
   }

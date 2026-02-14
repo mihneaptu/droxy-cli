@@ -102,7 +102,15 @@ test("interactive mode chooses provider-first models and syncs merged selection"
     sync: {
       buildProtocolUnavailableError: () => new Error("unreachable"),
       fetchAvailableModelEntries: async () => [
-        { id: "gpt-5", provider: "openai" },
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "minimal", "low", "medium", "high", "xhigh", "none"],
+          },
+        },
         { id: "claude-opus", provider: "anthropic" },
       ],
       resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
@@ -300,7 +308,15 @@ test("manage thinking modes updates active mode and history for existing models"
     sync: {
       buildProtocolUnavailableError: () => new Error("unreachable"),
       fetchAvailableModelEntries: async () => [
-        { id: "gpt-5", provider: "openai" },
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "minimal", "low", "medium", "high", "xhigh", "none"],
+          },
+        },
         { id: "claude-opus", provider: "anthropic" },
       ],
       resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
@@ -582,7 +598,15 @@ test("provider model picker preselects Droid-synced models when no prior selecti
     sync: {
       buildProtocolUnavailableError: () => new Error("unreachable"),
       fetchAvailableModelEntries: async () => [
-        { id: "gpt-5", provider: "openai" },
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "minimal", "low", "medium", "high", "xhigh", "none"],
+          },
+        },
       ],
       resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
       syncDroidSettings: async () => ({ success: true, result: { modelsAdded: 1 } }),
@@ -814,7 +838,15 @@ test("choose models prunes stale saved selections to current /v1/models before p
     sync: {
       buildProtocolUnavailableError: () => new Error("unreachable"),
       fetchAvailableModelEntries: async () => [
-        { id: "gpt-5", provider: "openai" },
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            verified: true,
+            allowedModes: ["auto", "minimal", "low", "medium", "high", "xhigh", "none"],
+          },
+        },
       ],
       resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
       syncDroidSettings: async (opts) => ({

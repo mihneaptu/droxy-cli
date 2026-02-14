@@ -62,7 +62,7 @@ test("statusProxy check mode skips provider verification probe", async () => {
         tlsEnabled: false,
         authDir: "~/.cli-proxy-api",
       }),
-      readState: () => ({}),
+      readState: () => ({ thinkingState: "verified" }),
       resolveAuthDir: (value) => value,
     },
     helpers: {
@@ -138,7 +138,7 @@ test("statusProxy includes provider verification fields", async () => {
         tlsEnabled: false,
         authDir: "~/.cli-proxy-api",
       }),
-      readState: () => ({}),
+      readState: () => ({ thinkingState: "verified" }),
       resolveAuthDir: (value) => value,
     },
     helpers: {
@@ -163,4 +163,5 @@ test("statusProxy includes provider verification fields", async () => {
   assert.equal(result.providers, 3);
   assert.equal(result.providersConnected, 3);
   assert.equal(result.providersState, "verified");
+  assert.equal(result.thinkingState, "verified");
 });

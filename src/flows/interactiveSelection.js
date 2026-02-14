@@ -14,6 +14,7 @@ const normalizeThinkingMode = helpers.normalizeThinkingMode;
 const normalizeThinkingModelModes = helpers.normalizeThinkingModelModes;
 const stripThinkingSuffix = helpers.stripThinkingSuffix;
 const THINKING_MODE_HISTORY_LIMIT = 5;
+const DEFAULT_THINKING_ALLOWED_MODES = Object.freeze(["auto", "none"]);
 
 function getProvidersWithStatus(login, configValues) {
   if (login && typeof login.getProvidersWithConnectionStatus === "function") {
@@ -198,13 +199,140 @@ function isLikelyThinkingModelId(modelId) {
   return /(^|[-_.])(thinking|reasoning)([-_.]|$)/.test(value);
 }
 
-function resolveThinkingModelModes(thinkingModels, existingThinkingModelModes = {}) {
+function orderThinkingModes(modes = []) {
+  const seen = new Set();
+  const output = [];
+  for (const mode of THINKING_MODE_VALUES) {
+    if (!Array.isArray(modes) || !modes.includes(mode) || seen.has(mode)) continue;
+    seen.add(mode);
+    output.push(mode);
+  }
+  for (const mode of Array.isArray(modes) ? modes : []) {
+    const normalized = normalizeThinkingMode(mode);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
+}
+
+function normalizeAllowedThinkingModes(allowedModes, options = {}) {
+  const includeNone = options.includeNone !== false;
+  const modeSet = new Set();
+  const values = Array.isArray(allowedModes) ? allowedModes : [allowedModes];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const direct = normalizeThinkingMode(value);
+    if (direct) {
+      modeSet.add(direct);
+      continue;
+    }
+    const tokens = value.split(/[\s,;|]+/g);
+    for (const token of tokens) {
+      const normalized = normalizeThinkingMode(token);
+      if (normalized) modeSet.add(normalized);
+    }
+  }
+  modeSet.add("auto");
+  if (includeNone) modeSet.add("none");
+  return orderThinkingModes(Array.from(modeSet));
+}
+
+function normalizeThinkingCapability(capability) {
+  const value = capability && typeof capability === "object" ? capability : {};
+  const verified = value.verified === true;
+  const supported = verified && value.supported === true;
+  if (!verified) {
+    return {
+      supported: false,
+      verified: false,
+      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+    };
+  }
+  if (!supported) {
+    return {
+      supported: false,
+      verified: true,
+      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+    };
+  }
+  const allowedModes = normalizeAllowedThinkingModes(value.allowedModes);
+  const hasAdvancedModes = allowedModes.some((mode) => mode !== "auto" && mode !== "none");
+  if (hasAdvancedModes) {
+    return {
+      supported: true,
+      verified: true,
+      allowedModes,
+    };
+  }
+  return {
+    supported: true,
+    verified: true,
+    allowedModes: orderThinkingModes(THINKING_MODE_VALUES),
+  };
+}
+
+function buildThinkingCapabilityByModelId(modelEntries = []) {
+  const output = {};
+  for (const entry of Array.isArray(modelEntries) ? modelEntries : []) {
+    const modelId = stripThinkingSuffix(entry && entry.id ? entry.id : "").toLowerCase();
+    if (!modelId) continue;
+    output[modelId] = normalizeThinkingCapability(entry.thinking);
+  }
+  return output;
+}
+
+function resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId = {}) {
+  const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
+  if (
+    normalizedModelId &&
+    Object.prototype.hasOwnProperty.call(thinkingCapabilityByModelId, normalizedModelId)
+  ) {
+    return normalizeThinkingCapability(thinkingCapabilityByModelId[normalizedModelId]);
+  }
+  return normalizeThinkingCapability(null);
+}
+
+function getAllowedThinkingModesForModel(
+  modelId,
+  thinkingCapabilityByModelId = {},
+  options = {}
+) {
+  const includeNone = options.includeNone !== false;
+  const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+  if (capability.verified !== true || capability.supported !== true) {
+    return includeNone ? ["auto", "none"] : ["auto"];
+  }
+  const allowedModes = normalizeAllowedThinkingModes(capability.allowedModes, { includeNone });
+  if (allowedModes.length) return allowedModes;
+  return includeNone ? ["auto", "none"] : ["auto"];
+}
+
+function getDefaultThinkingModeForModel(modelId, thinkingCapabilityByModelId = {}) {
+  const allowedModes = getAllowedThinkingModesForModel(modelId, thinkingCapabilityByModelId, {
+    includeNone: false,
+  });
+  if (allowedModes.includes("medium")) return "medium";
+  if (allowedModes.includes("auto")) return "auto";
+  return allowedModes.length ? allowedModes[0] : "auto";
+}
+
+function resolveThinkingModelModes(thinkingModels, existingThinkingModelModes = {}, options = {}) {
   const thinkingModelIds = normalizeModelIds(thinkingModels);
   const existingModeLookup = normalizeThinkingModelModes(existingThinkingModelModes);
+  const thinkingCapabilityByModelId =
+    options && typeof options === "object" && options.thinkingCapabilityByModelId
+      ? options.thinkingCapabilityByModelId
+      : {};
   const output = {};
   for (const modelId of thinkingModelIds) {
     const existingMode = existingModeLookup[modelId.toLowerCase()];
-    output[modelId] = existingMode || "medium";
+    const allowedModes = getAllowedThinkingModesForModel(modelId, thinkingCapabilityByModelId);
+    if (existingMode && allowedModes.includes(existingMode)) {
+      output[modelId] = existingMode;
+      continue;
+    }
+    output[modelId] = getDefaultThinkingModeForModel(modelId, thinkingCapabilityByModelId);
   }
   return output;
 }
@@ -280,33 +408,73 @@ function thinkingModeLabelForModel(modelId, thinkingModelModes = {}, thinkingMod
   return "Off";
 }
 
-async function promptThinkingModeForModel(menu, modelId, initialMode = "medium") {
-  const modeOptions = THINKING_MODE_VALUES.slice();
+async function promptThinkingModeForModel(menu, modelId, initialMode = "medium", options = {}) {
+  const modeOptionsRaw =
+    options && typeof options === "object" ? options.allowedModes : null;
+  const modeOptions = orderThinkingModes(
+    normalizeAllowedThinkingModes(
+      Array.isArray(modeOptionsRaw) && modeOptionsRaw.length
+        ? modeOptionsRaw
+        : DEFAULT_THINKING_ALLOWED_MODES
+    )
+  );
   const modeItems = modeOptions.map(thinkingModeTitleCase);
-  const normalizedInitialMode = normalizeThinkingMode(initialMode) || "medium";
-  const initialIndex = Math.max(0, modeOptions.indexOf(normalizedInitialMode));
+  const normalizedInitialMode = normalizeThinkingMode(initialMode);
+  const fallbackInitialMode = modeOptions.includes("medium")
+    ? "medium"
+    : modeOptions.includes("auto")
+      ? "auto"
+      : modeOptions[0] || "auto";
+  const resolvedInitialMode =
+    normalizedInitialMode && modeOptions.includes(normalizedInitialMode)
+      ? normalizedInitialMode
+      : fallbackInitialMode;
+  const initialIndex = Math.max(0, modeOptions.indexOf(resolvedInitialMode));
   const selection = await menu.selectSingle({
     title: `Thinking mode • ${modelId}`,
     items: modeItems,
     initialIndex,
     hint: "Use ↑/↓ and Enter. Press q to keep current mode.",
   });
-  if (!selection || selection.cancelled) return normalizedInitialMode;
-  return modeOptions[selection.index] || normalizedInitialMode;
+  if (!selection || selection.cancelled) return resolvedInitialMode;
+  return modeOptions[selection.index] || resolvedInitialMode;
 }
 
-async function promptThinkingModelModes(menu, thinkingModels, initialModes = {}) {
+async function promptThinkingModelModes(menu, thinkingModels, initialModes = {}, options = {}) {
   const thinkingModelIds = normalizeModelIds(thinkingModels);
   if (!thinkingModelIds.length) return {};
   const modeLookup = normalizeThinkingModelModes(initialModes);
+  const thinkingCapabilityByModelId =
+    options && typeof options === "object" && options.thinkingCapabilityByModelId
+      ? options.thinkingCapabilityByModelId
+      : {};
   const output = {};
   for (const modelId of thinkingModelIds) {
+    const allowedModes = getAllowedThinkingModesForModel(
+      modelId,
+      thinkingCapabilityByModelId
+    );
+    const fallbackMode = getDefaultThinkingModeForModel(
+      modelId,
+      thinkingCapabilityByModelId
+    );
+    const initialModeCandidate = modeLookup[modelId.toLowerCase()];
+    const initialMode =
+      initialModeCandidate && allowedModes.includes(initialModeCandidate)
+        ? initialModeCandidate
+        : fallbackMode;
     const nextMode = await promptThinkingModeForModel(
       menu,
       modelId,
-      modeLookup[modelId.toLowerCase()] || "medium"
+      initialMode,
+      { allowedModes }
     );
-    output[modelId] = normalizeThinkingMode(nextMode) || "medium";
+    const normalizedNextMode = normalizeThinkingMode(nextMode);
+    if (normalizedNextMode && allowedModes.includes(normalizedNextMode)) {
+      output[modelId] = normalizedNextMode;
+      continue;
+    }
+    output[modelId] = initialMode;
   }
   return output;
 }
@@ -421,6 +589,19 @@ async function promptThinkingModelSelection(menu, models, initialSelected) {
 
 function resolveThinkingModels(models, existingThinkingModels = [], options = {}) {
   const selected = normalizeModelIds(models);
+  const thinkingCapabilityByModelId =
+    options && typeof options === "object" && options.thinkingCapabilityByModelId
+      ? options.thinkingCapabilityByModelId
+      : {};
+  const selectedWithVerifiedThinkingCapability = selected.filter((modelId) => {
+    const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+    return capability.verified === true;
+  });
+  const supportedByBackend = selectedWithVerifiedThinkingCapability.filter((modelId) => {
+    const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+    return capability.supported === true;
+  });
+  const hasVerifiedThinkingCapabilities = selectedWithVerifiedThinkingCapability.length > 0;
   const explicitThinkingCandidates = normalizeModelIds(
     selected.filter((modelId) => isLikelyThinkingModelId(modelId))
   );
@@ -428,16 +609,29 @@ function resolveThinkingModels(models, existingThinkingModels = [], options = {}
   const hasSavedThinkingSelection =
     options && typeof options === "object" && options.hasSavedThinkingSelection === true;
   if (!hasSavedThinkingSelection) {
+    if (hasVerifiedThinkingCapabilities) {
+      return supportedByBackend;
+    }
     return explicitThinkingCandidates;
   }
 
   const selectedSet = new Set(selected);
-  return normalizeModelIds(
+  const persistedSelection = normalizeModelIds(
     normalizeModelIds(existingThinkingModels).filter((modelId) => selectedSet.has(modelId))
   );
+  if (hasVerifiedThinkingCapabilities) {
+    return normalizeModelIds(
+      persistedSelection.filter((modelId) => {
+        const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+        return capability.verified === true && capability.supported === true;
+      })
+    );
+  }
+  return persistedSelection;
 }
 
 module.exports = {
+  buildThinkingCapabilityByModelId,
   fetchModelEntriesForSelection,
   getConnectedProvidersWithStatus,
   getProvidersWithStatus,

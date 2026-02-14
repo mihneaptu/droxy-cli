@@ -83,6 +83,70 @@ const MODEL_STATUS_HINT_PATHS = Object.freeze([
   ["meta", "access", "status"],
   ["meta", "entitlement", "status"],
 ]);
+const THINKING_SUPPORT_HINT_PATHS = Object.freeze([
+  ["thinking"],
+  ["thinking", "enabled"],
+  ["thinking", "supported"],
+  ["thinking", "available"],
+  ["thinking", "allowed"],
+  ["reasoning"],
+  ["reasoning", "enabled"],
+  ["reasoning", "supported"],
+  ["reasoning", "available"],
+  ["reasoning", "allowed"],
+  ["capabilities", "thinking"],
+  ["capabilities", "reasoning"],
+  ["features", "thinking"],
+  ["features", "reasoning"],
+  ["meta", "thinking"],
+  ["meta", "reasoning"],
+  ["meta", "capabilities", "thinking"],
+  ["meta", "capabilities", "reasoning"],
+]);
+const THINKING_ALLOWED_MODES_HINT_PATHS = Object.freeze([
+  ["thinking_modes"],
+  ["thinkingModes"],
+  ["reasoning_modes"],
+  ["reasoningModes"],
+  ["thinking", "modes"],
+  ["thinking", "allowed_modes"],
+  ["thinking", "allowedModes"],
+  ["thinking", "supported_modes"],
+  ["thinking", "supportedModes"],
+  ["reasoning", "modes"],
+  ["reasoning", "allowed_modes"],
+  ["reasoning", "allowedModes"],
+  ["reasoning", "supported_modes"],
+  ["reasoning", "supportedModes"],
+  ["capabilities", "thinking_modes"],
+  ["capabilities", "thinkingModes"],
+  ["capabilities", "reasoning_modes"],
+  ["capabilities", "reasoningModes"],
+  ["meta", "thinking_modes"],
+  ["meta", "thinkingModes"],
+  ["meta", "reasoning_modes"],
+  ["meta", "reasoningModes"],
+  ["meta", "thinking", "modes"],
+  ["meta", "reasoning", "modes"],
+]);
+const THINKING_STATUS_HINT_PATHS = Object.freeze([
+  ["thinking_status"],
+  ["thinkingStatus"],
+  ["reasoning_status"],
+  ["reasoningStatus"],
+  ["thinking", "status"],
+  ["thinking", "state"],
+  ["thinking", "availability"],
+  ["reasoning", "status"],
+  ["reasoning", "state"],
+  ["reasoning", "availability"],
+  ["meta", "thinking_status"],
+  ["meta", "thinkingStatus"],
+  ["meta", "reasoning_status"],
+  ["meta", "reasoningStatus"],
+  ["meta", "thinking", "status"],
+  ["meta", "reasoning", "status"],
+]);
 const RESTRICTED_STATUS_VALUES = new Set([
   "blocked",
   "denied",
@@ -96,6 +160,7 @@ const RESTRICTED_STATUS_VALUES = new Set([
   "subscription_required",
   "unavailable",
 ]);
+const DEFAULT_THINKING_ALLOWED_MODES = Object.freeze(["auto", "none"]);
 const MANAGEMENT_AUTH_FILES_PATH = "/v0/management/auth-files";
 const MANAGEMENT_OAUTH_EXCLUDED_MODELS_PATH = "/v0/management/oauth-excluded-models";
 const UNSUPPORTED_MODEL_HINTS = Object.freeze([
@@ -346,10 +411,11 @@ function createSyncApi(overrides = {}) {
     typeof helpers.isAdvancedThinkingMode === "function"
       ? helpers.isAdvancedThinkingMode
       : helpersModule.isAdvancedThinkingMode;
-  const supportsAdvancedThinkingModes =
-    typeof helpers.supportsAdvancedThinkingModes === "function"
-      ? helpers.supportsAdvancedThinkingModes
-      : helpersModule.supportsAdvancedThinkingModes;
+  const THINKING_MODE_VALUES = Array.isArray(helpers.THINKING_MODE_VALUES)
+    ? helpers.THINKING_MODE_VALUES
+    : Array.isArray(helpersModule.THINKING_MODE_VALUES)
+      ? helpersModule.THINKING_MODE_VALUES
+      : ["auto", "minimal", "low", "medium", "high", "xhigh", "none"];
 
   function normalizeThinkingModelIds(thinkingModels) {
     return normalizeSelectedModelIds(thinkingModels)
@@ -357,24 +423,287 @@ function createSyncApi(overrides = {}) {
       .filter(Boolean);
   }
 
-  function normalizeThinkingModeForModel(modelId, mode) {
-    const normalizedMode = normalizeThinkingMode(mode);
-    if (!normalizedMode) return "";
-    if (normalizedMode === "none") return "none";
-    if (normalizedMode === "auto") return "auto";
-    if (!isAdvancedThinkingMode(normalizedMode)) return "auto";
-    if (!supportsAdvancedThinkingModes(modelId)) return "auto";
-    return normalizedMode;
+  function orderThinkingModes(modes) {
+    const modeSet = new Set();
+    for (const mode of Array.isArray(modes) ? modes : []) {
+      const normalized = normalizeThinkingMode(mode);
+      if (!normalized) continue;
+      modeSet.add(normalized);
+    }
+    const ordered = [];
+    for (const mode of THINKING_MODE_VALUES) {
+      if (!modeSet.has(mode)) continue;
+      ordered.push(mode);
+      modeSet.delete(mode);
+    }
+    return ordered.concat(Array.from(modeSet).sort((left, right) => left.localeCompare(right)));
   }
 
-  function appendThinkingVariant(baseModelId, mode, outputModels) {
-    const normalizedMode = normalizeThinkingModeForModel(baseModelId, mode);
+  function collectThinkingModesFromHint(value, outputModes, depth = 0) {
+    if (depth > 6 || value === undefined || value === null) return;
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        collectThinkingModesFromHint(entry, outputModes, depth + 1);
+      }
+      return;
+    }
+    if (typeof value === "string") {
+      const directMode = normalizeThinkingMode(value);
+      if (directMode) {
+        outputModes.add(directMode);
+      } else {
+        const splitTokens = value.split(/[\s,;|]+/g);
+        for (const token of splitTokens) {
+          const tokenMode = normalizeThinkingMode(token);
+          if (tokenMode) outputModes.add(tokenMode);
+        }
+      }
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+
+    for (const key of [
+      "modes",
+      "mode",
+      "allowed_modes",
+      "allowedModes",
+      "supported_modes",
+      "supportedModes",
+      "values",
+      "options",
+      "available_modes",
+      "availableModes",
+    ]) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      collectThinkingModesFromHint(value[key], outputModes, depth + 1);
+    }
+
+    let sawModeKeys = false;
+    for (const [key, flag] of Object.entries(value)) {
+      const modeFromKey = normalizeThinkingMode(key);
+      if (!modeFromKey) continue;
+      sawModeKeys = true;
+      const denied = parseDenyHint(flag);
+      if (denied === true) continue;
+      outputModes.add(modeFromKey);
+    }
+    if (sawModeKeys) return;
+
+    for (const nested of Object.values(value)) {
+      if (typeof nested === "string" || Array.isArray(nested) || (nested && typeof nested === "object")) {
+        collectThinkingModesFromHint(nested, outputModes, depth + 1);
+      }
+    }
+  }
+
+  function normalizeAllowedThinkingModes(value, options = {}) {
+    const includeAuto = options.includeAuto !== false;
+    const includeNone = options.includeNone !== false;
+    const modes = new Set();
+    collectThinkingModesFromHint(value, modes);
+    if (includeAuto) modes.add("auto");
+    if (includeNone) modes.add("none");
+    return orderThinkingModes(Array.from(modes));
+  }
+
+  function parseThinkingSupportState(value) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const key of [
+        "supported",
+        "enabled",
+        "available",
+        "allowed",
+        "value",
+        "status",
+        "state",
+      ]) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        const nested = parseThinkingSupportState(value[key]);
+        if (nested !== null) return nested;
+      }
+      const nestedModes = normalizeAllowedThinkingModes(value, {
+        includeAuto: false,
+        includeNone: false,
+      });
+      if (nestedModes.length) return true;
+      return null;
+    }
+
+    const allowHint = parseAllowHint(value);
+    if (allowHint === true) return true;
+    if (allowHint === false) return false;
+
+    const denyHint = parseDenyHint(value);
+    if (denyHint === true) return false;
+    if (denyHint === false) return true;
+
+    if (isRestrictedStatusValue(value)) return false;
+    return null;
+  }
+
+  function normalizeThinkingCapability(value) {
+    if (!value || typeof value !== "object") {
+      return {
+        supported: false,
+        verified: false,
+        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+      };
+    }
+
+    const verified = value.verified === true;
+    if (!verified) {
+      return {
+        supported: false,
+        verified: false,
+        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+      };
+    }
+
+    const supportState = parseThinkingSupportState(value.supported);
+    if (supportState === false) {
+      return {
+        supported: false,
+        verified: true,
+        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+      };
+    }
+
+    let allowedModes = normalizeAllowedThinkingModes(value.allowedModes);
+    const advancedModes = allowedModes.filter((mode) => mode !== "auto" && mode !== "none");
+    if (supportState === true && !advancedModes.length) {
+      allowedModes = orderThinkingModes(THINKING_MODE_VALUES);
+    }
+
+    return {
+      supported: supportState === true || advancedModes.length > 0,
+      verified: true,
+      allowedModes: allowedModes.length ? allowedModes : DEFAULT_THINKING_ALLOWED_MODES.slice(),
+    };
+  }
+
+  function extractThinkingCapability(item) {
+    if (!item || typeof item !== "object") {
+      return normalizeThinkingCapability(null);
+    }
+
+    const supportHint = firstDefinedPathValue(item, THINKING_SUPPORT_HINT_PATHS);
+    const modesHint = firstDefinedPathValue(item, THINKING_ALLOWED_MODES_HINT_PATHS);
+    const statusHint = firstDefinedPathValue(item, THINKING_STATUS_HINT_PATHS);
+
+    const supportStateDirect = parseThinkingSupportState(supportHint);
+    const supportStateFromStatus = parseThinkingSupportState(statusHint);
+    const supportState =
+      supportStateDirect !== null ? supportStateDirect : supportStateFromStatus;
+    let allowedModes = normalizeAllowedThinkingModes(modesHint);
+    const advancedModes = allowedModes.filter((mode) => mode !== "auto" && mode !== "none");
+
+    if (supportState === false) {
+      return {
+        supported: false,
+        verified: true,
+        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+      };
+    }
+
+    if (supportState === true) {
+      if (!advancedModes.length) {
+        allowedModes = orderThinkingModes(THINKING_MODE_VALUES);
+      }
+      return {
+        supported: true,
+        verified: true,
+        allowedModes,
+      };
+    }
+
+    if (advancedModes.length) {
+      return {
+        supported: true,
+        verified: true,
+        allowedModes,
+      };
+    }
+
+    return {
+      supported: false,
+      verified: false,
+      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+    };
+  }
+
+  function buildThinkingCapabilityByModelId(entries) {
+    const outputByModelId = {};
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      const modelId = stripThinkingSuffix(entry && entry.id ? entry.id : "").toLowerCase();
+      if (!modelId) continue;
+      outputByModelId[modelId] = normalizeThinkingCapability(entry.thinking || {});
+    }
+    return outputByModelId;
+  }
+
+  function resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId = {}) {
+    const normalizedId = stripThinkingSuffix(modelId).toLowerCase();
+    if (
+      normalizedId &&
+      Object.prototype.hasOwnProperty.call(thinkingCapabilityByModelId, normalizedId)
+    ) {
+      return normalizeThinkingCapability(thinkingCapabilityByModelId[normalizedId]);
+    }
+    return {
+      supported: false,
+      verified: false,
+      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+    };
+  }
+
+  function resolveThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId = {}) {
+    const normalizedMode = normalizeThinkingMode(mode);
+    if (!normalizedMode) {
+      return { mode: "", downgraded: false, reason: "" };
+    }
+    if (normalizedMode === "none" || normalizedMode === "auto") {
+      return { mode: normalizedMode, downgraded: false, reason: "" };
+    }
+    if (!isAdvancedThinkingMode(normalizedMode)) {
+      return { mode: "auto", downgraded: true, reason: "invalid_advanced_mode" };
+    }
+
+    const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+    if (!capability.verified) {
+      return { mode: "auto", downgraded: true, reason: "backend_unverified" };
+    }
+    if (capability.supported !== true) {
+      return { mode: "auto", downgraded: true, reason: "backend_unsupported" };
+    }
+
+    const allowedModes = new Set(normalizeAllowedThinkingModes(capability.allowedModes));
+    if (!allowedModes.has(normalizedMode)) {
+      return { mode: "auto", downgraded: true, reason: "mode_not_allowed" };
+    }
+
+    return { mode: normalizedMode, downgraded: false, reason: "" };
+  }
+
+  function normalizeThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId = {}) {
+    return resolveThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId).mode;
+  }
+
+  function appendThinkingVariant(baseModelId, mode, outputModels, thinkingCapabilityByModelId = {}) {
+    const normalizedMode = normalizeThinkingModeForModel(
+      baseModelId,
+      mode,
+      thinkingCapabilityByModelId
+    );
     if (!normalizedMode) return;
     if (normalizedMode === "none") return;
     outputModels.push(`${baseModelId}(${normalizedMode})`);
   }
 
-  function expandProviderModelsWithThinkingVariants(providerModels, thinkingModelModes) {
+  function expandProviderModelsWithThinkingVariants(
+    providerModels,
+    thinkingModelModes,
+    thinkingCapabilityByModelId = {}
+  ) {
     const expanded = [];
     const seen = new Set();
     const normalizedModes = normalizeThinkingModelModes(thinkingModelModes);
@@ -389,7 +718,7 @@ function createSyncApi(overrides = {}) {
       const mode = normalizedModes[stripThinkingSuffix(modelId).toLowerCase()];
       if (!mode) continue;
       const variants = [];
-      appendThinkingVariant(modelId, mode, variants);
+      appendThinkingVariant(modelId, mode, variants, thinkingCapabilityByModelId);
       for (const variant of variants) {
         if (seen.has(variant)) continue;
         seen.add(variant);
@@ -482,6 +811,7 @@ function createSyncApi(overrides = {}) {
     openAiModels,
     anthropicModels,
     thinkingModelModes,
+    thinkingCapabilityByModelId,
   }) {
     const scheme = protocol || (tlsEnabled ? "https" : "http");
     const resolvedHost = normalizedHost(host);
@@ -489,11 +819,13 @@ function createSyncApi(overrides = {}) {
     const entries = [];
     const openAiExpandedModels = expandProviderModelsWithThinkingVariants(
       openAiModels,
-      thinkingModelModes
+      thinkingModelModes,
+      thinkingCapabilityByModelId
     );
     const anthropicExpandedModels = expandProviderModelsWithThinkingVariants(
       anthropicModels,
-      thinkingModelModes
+      thinkingModelModes,
+      thinkingCapabilityByModelId
     );
 
     for (const model of openAiExpandedModels) {
@@ -1759,6 +2091,7 @@ function createSyncApi(overrides = {}) {
         provider: "",
         created: 0,
         entitlement: {},
+        thinking: normalizeThinkingCapability(null),
         raw: { id: item },
       };
     }
@@ -1791,6 +2124,7 @@ function createSyncApi(overrides = {}) {
       provider: provider ? String(provider) : "",
       created: Number(created) || 0,
       entitlement: extractEntitlementHints(item),
+      thinking: extractThinkingCapability(item),
       raw: item,
     };
   }
@@ -1982,6 +2316,7 @@ function createSyncApi(overrides = {}) {
       config.updateState({
         lastFactorySyncAt: new Date().toISOString(),
         selectedModels: [],
+        thinkingState: "unknown",
         thinkingModels: [],
         thinkingModelModes: {},
         factory: {
@@ -2011,9 +2346,48 @@ function createSyncApi(overrides = {}) {
     }
 
     detectedEntries = filtered.entries;
+    const thinkingCapabilityByModelId = buildThinkingCapabilityByModelId(detectedEntries);
+    const notifyThinkingModeDowngrade = (
+      modelId,
+      requestedMode,
+      reason,
+      warningDedupSet
+    ) => {
+      const safeModelId = String(modelId || "").trim();
+      const safeRequestedMode = normalizeThinkingMode(requestedMode);
+      if (!safeModelId || !safeRequestedMode) return;
+      const warningKey = `${safeModelId.toLowerCase()}:${safeRequestedMode}`;
+      if (warningDedupSet && warningDedupSet.has(warningKey)) return;
+      if (warningDedupSet) warningDedupSet.add(warningKey);
+      if (quiet) return;
+
+      if (output && typeof output.printThinkingModeDowngrade === "function") {
+        output.printThinkingModeDowngrade({
+          modelId: safeModelId,
+          requestedMode: safeRequestedMode,
+          fallbackMode: "auto",
+          reason,
+        });
+        return;
+      }
+
+      if (output && typeof output.printWarning === "function") {
+        output.printWarning(
+          `Thinking mode '${safeRequestedMode}' for ${safeModelId} is not backend-verified. Using auto.`
+        );
+      }
+    };
     const syncedModelIds = normalizeSelectedModelIds(
       detectedEntries.map((entry) => (entry && entry.id ? entry.id : ""))
     );
+    const thinkingState =
+      syncedModelIds.length > 0 &&
+      syncedModelIds.every(
+        (modelId) =>
+          resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId).verified === true
+      )
+        ? "verified"
+        : "unknown";
     const explicitThinkingModelModes = normalizeThinkingModelModes(state.thinkingModelModes || {});
     const fallbackThinkingModelSet = new Set(
       normalizeThinkingModelIds(state.thinkingModels || []).map((modelId) =>
@@ -2021,20 +2395,45 @@ function createSyncApi(overrides = {}) {
       )
     );
     const thinkingModelModes = {};
+    const thinkingModeDowngradeWarnings = new Set();
     for (const modelId of syncedModelIds) {
       const normalizedId = String(modelId).toLowerCase();
-      const explicitMode = normalizeThinkingModeForModel(
+      const explicitRequestedMode = explicitThinkingModelModes[normalizedId];
+      const explicitModeOutcome = resolveThinkingModeForModel(
         modelId,
-        explicitThinkingModelModes[normalizedId]
+        explicitRequestedMode,
+        thinkingCapabilityByModelId
       );
+      const explicitMode = explicitModeOutcome.mode;
       if (explicitMode) {
         if (explicitMode === "none") continue;
+        if (explicitModeOutcome.downgraded) {
+          notifyThinkingModeDowngrade(
+            modelId,
+            explicitRequestedMode,
+            explicitModeOutcome.reason,
+            thinkingModeDowngradeWarnings
+          );
+        }
         thinkingModelModes[modelId] = explicitMode;
         continue;
       }
       if (fallbackThinkingModelSet.has(normalizedId)) {
-        const fallbackMode = normalizeThinkingModeForModel(modelId, "medium");
+        const fallbackModeOutcome = resolveThinkingModeForModel(
+          modelId,
+          "medium",
+          thinkingCapabilityByModelId
+        );
+        const fallbackMode = fallbackModeOutcome.mode;
         if (fallbackMode && fallbackMode !== "none") {
+          if (fallbackModeOutcome.downgraded) {
+            notifyThinkingModeDowngrade(
+              modelId,
+              "medium",
+              fallbackModeOutcome.reason,
+              thinkingModeDowngradeWarnings
+            );
+          }
           thinkingModelModes[modelId] = fallbackMode;
         }
       }
@@ -2062,6 +2461,7 @@ function createSyncApi(overrides = {}) {
           openAiModels: split.openai,
           anthropicModels: split.anthropic,
           thinkingModelModes,
+          thinkingCapabilityByModelId,
         }),
       };
     }
@@ -2073,6 +2473,7 @@ function createSyncApi(overrides = {}) {
         : syncedModelIds.length
           ? { selectedModels: syncedModelIds }
           : {}),
+      thinkingState,
       thinkingModels: thinkingModelIds,
       thinkingModelModes,
       factory: {
