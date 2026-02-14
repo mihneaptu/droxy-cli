@@ -113,7 +113,7 @@ const PROVIDER_ID_ALIASES = Object.freeze({
   antigravity: ["antigravity"],
   claude: ["claude", "anthropic"],
   codex: ["codex", "openai"],
-  gemini: ["gemini", "google", "aistudio"],
+  gemini: ["gemini", "google", "aistudio", "gemini-cli"],
   iflow: ["iflow"],
   kimi: ["kimi", "moonshot"],
   qwen: ["qwen"],
@@ -1132,7 +1132,12 @@ function createSyncApi(overrides = {}) {
     const statusToken = normalizeStatusToken(
       file.connection_state || file.connectionState || file.auth_state || file.authState || file.status || file.state
     );
-    if (statusToken === "connected" || statusToken === "authenticated" || statusToken === "authorized") {
+    if (
+      statusToken === "connected" ||
+      statusToken === "authenticated" ||
+      statusToken === "authorized" ||
+      statusToken === "active"
+    ) {
       return "connected";
     }
     if (
@@ -1140,7 +1145,9 @@ function createSyncApi(overrides = {}) {
       statusToken === "unauthenticated" ||
       statusToken === "unauthorized" ||
       statusToken === "expired" ||
-      statusToken === "invalid"
+      statusToken === "invalid" ||
+      statusToken === "error" ||
+      statusToken === "failed"
     ) {
       return "disconnected";
     }
