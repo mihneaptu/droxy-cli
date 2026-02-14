@@ -329,7 +329,7 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
       sync,
       output,
     });
-    if (!startResult || typeof startResult !== "object" || Array.isArray(startResult) || skipped) {
+    if (skipped) {
       return startResult;
     }
     return { ...startResult, syncResult };

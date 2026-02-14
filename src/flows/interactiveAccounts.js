@@ -266,6 +266,8 @@ async function promptAccountRemovalConfirmation({ menu, output, account, provide
 
 module.exports = {
   ACCOUNT_MENU_ACTIONS,
+  formatAccountIdentity,
+  getRemovableAccounts,
   promptAccountForRemoval,
   promptAccountRemovalConfirmation,
   promptConnectedAccountsList,

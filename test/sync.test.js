@@ -873,6 +873,40 @@ test("fetchManagedAuthFiles returns normalized multi-account rows", async () => 
   assert.equal(rows[1].removable, false);
 });
 
+test("fetchManagedAuthFiles preserves zero auth index values", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-zero.json",
+              path: "C:/auth/openai-zero.json",
+              auth_index: 0,
+              status: "connected",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const rows = await api.fetchManagedAuthFiles(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].authIndex, 0);
+});
+
 test("removeManagedAuthFile uses DELETE auth-files endpoint with name/index query", async () => {
   let requestMethod = "";
   let requestName = "";
@@ -910,6 +944,81 @@ test("removeManagedAuthFile uses DELETE auth-files endpoint with name/index quer
   assert.equal(requestName, "openai-main.json");
   assert.equal(requestIndex, "2");
   assert.equal(result.success, true);
+});
+
+test("removeManagedAuthFile keeps zero auth index in DELETE query", async () => {
+  let requestIndex = "";
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": ({ url }) => {
+        const parsed = new URL(url);
+        requestIndex = parsed.searchParams.get("index") || "";
+        return {
+          statusCode: 200,
+          body: { success: true },
+        };
+      },
+    }),
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "openai-main.json",
+      authIndex: 0,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(requestIndex, "0");
+  assert.equal(result.success, true);
+});
+
+test("removeManagedAuthFile treats 204 no-content as successful removal", async () => {
+  const api = sync.createSyncApi({
+    http: {
+      request: (_url, _options, callback) => {
+        const req = new EventEmitter();
+        req.setTimeout = () => {};
+        req.destroy = (err) => {
+          if (err) {
+            process.nextTick(() => req.emit("error", err));
+          }
+        };
+        req.end = () => {
+          process.nextTick(() => {
+            const res = new EventEmitter();
+            res.statusCode = 204;
+            callback(res);
+            res.emit("end");
+          });
+        };
+        return req;
+      },
+    },
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "openai-main.json",
+      authIndex: 0,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.removed, true);
 });
 
 test("removeManagedAuthFile blocks runtime-only entries", async () => {

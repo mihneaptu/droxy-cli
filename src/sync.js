@@ -1197,7 +1197,7 @@ function createSyncApi(overrides = {}) {
       const providerId = normalizeProviderIdStrict(providerRaw);
       const name = normalizeAuthFileName(file);
       const path = String(file.path || "").trim();
-      const authIndex = parseIntegerOrNull(file.auth_index || file.authIndex || file.index);
+      const authIndex = parseIntegerOrNull(file.auth_index ?? file.authIndex ?? file.index);
       const connectionState = parseAuthFileConnectionState(file);
       const statusMessage = String(
         file.status_message || file.statusMessage || file.detail || ""
@@ -1536,8 +1536,13 @@ function createSyncApi(overrides = {}) {
             reject(new Error(`HTTP ${res.statusCode}: ${body}`));
             return;
           }
+          const trimmed = body.trim();
+          if (!trimmed) {
+            resolve({});
+            return;
+          }
           try {
-            resolve(JSON.parse(body));
+            resolve(JSON.parse(trimmed));
           } catch {
             reject(new Error("Invalid JSON response"));
           }

@@ -1,6 +1,8 @@
 "use strict";
 
 const {
+  formatAccountIdentity: describeAccount,
+  getRemovableAccounts,
   promptAccountForRemoval,
   promptAccountRemovalConfirmation,
   promptAccountsAction,
@@ -20,24 +22,6 @@ function createInteractiveProviderActions({
   proxy,
   sync,
 }) {
-  function describeAccount(account) {
-    if (!account || typeof account !== "object") return "account";
-    return (
-      String(account.email || "").trim() ||
-      String(account.account || "").trim() ||
-      String(account.label || "").trim() ||
-      String(account.name || "").trim() ||
-      String(account.path || "").trim() ||
-      "account"
-    );
-  }
-
-  function getRemovableAccounts(accountRows = []) {
-    return (Array.isArray(accountRows) ? accountRows : []).filter(
-      (row) => row && row.removable === true
-    );
-  }
-
   async function readAccountsContext() {
     config.ensureConfig();
     const configValues = config.readConfigValues();
