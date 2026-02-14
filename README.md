@@ -22,18 +22,18 @@ Droxy CLI is an MVP focused on one job: get your providers connected, keep a loc
 
 ## Install
 
-### Option A: Install from GitHub release scripts
+### Option A: Install from a pinned GitHub snapshot
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/mihneaptu/droxy-cli/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/mihneaptu/droxy-cli/7f31fb11f5f021833995bef0506d603916fec9a1/install.ps1 | iex
 ```
 
 macOS/Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mihneaptu/droxy-cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mihneaptu/droxy-cli/7f31fb11f5f021833995bef0506d603916fec9a1/install.sh | sh
 ```
 
 ### Option B: Install from source (developer-friendly)
@@ -169,15 +169,9 @@ Binary missing:
 - Place `cli-proxy-api-plus` in `vendor/`, or
 - set `DROXY_PROXY_BIN` to the executable path.
 
-## Project Docs
+## Contributing
 
-- Style system: `docs/DROXY_STYLE_GUIDE.md`
-- Git workflow: `docs/GIT_WORKFLOW.md`
-- Contributing: `CONTRIBUTING.md`
-- Code of conduct: `CODE_OF_CONDUCT.md`
-- Security policy: `SECURITY.md`
-- Support guide: `SUPPORT.md`
-- Contributor operating rules: `AGENTS.md`
+For contribution workflow, code of conduct, and security policy details, see `CONTRIBUTING.md`.
 
 ## Support and Security
 
