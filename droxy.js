@@ -322,13 +322,30 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
     if (!running) {
       return startResult;
     }
-    const { skipped, syncResult } = await syncPersistedModelSelection({
-      quiet,
-      config,
-      helpers,
-      sync,
-      output,
-    });
+    let syncSelection = null;
+    try {
+      syncSelection = await syncPersistedModelSelection({
+        quiet,
+        config,
+        helpers,
+        sync,
+        output,
+      });
+    } catch (err) {
+      const message = err && err.message ? err.message : String(err || "Unknown error");
+      if (!quiet && output && typeof output.printWarning === "function") {
+        output.printWarning(`Proxy started, but model auto-sync failed: ${message}`);
+      }
+      return {
+        ...startResult,
+        syncResult: {
+          success: false,
+          reason: "auto_sync_failed",
+          message,
+        },
+      };
+    }
+    const { skipped, syncResult } = syncSelection;
     if (skipped) {
       return startResult;
     }

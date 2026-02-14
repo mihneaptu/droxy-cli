@@ -43,6 +43,7 @@ function createDeps(options = {}) {
       output: {
         log: (msg) => calls.push(["log", String(msg)]),
         printInfo: (msg) => calls.push(["printInfo", String(msg)]),
+        printWarning: (msg) => calls.push(["printWarning", String(msg)]),
         printGuidedError: (payload) => calls.push(["printGuidedError", payload]),
       },
       proxy: {
@@ -118,6 +119,32 @@ test("start skips sync when no saved selection and does not sync on failed start
   const failedStartResult = await runCli(["start"], failedStart.deps);
   assert.deepEqual(failedStart.calls, [["startProxy", { quiet: false, allowAttach: true }]]);
   assert.deepEqual(failedStartResult, { running: false, reason: "binary_missing" });
+});
+
+test("start keeps proxy success when auto-sync throws", async () => {
+  const target = createDeps();
+  target.deps.sync.syncDroidSettings = async (opts) => {
+    target.calls.push(["syncDroidSettings", opts]);
+    throw new Error("disk write failed");
+  };
+
+  const result = await runCli(["start"], target.deps);
+  assert.deepEqual(target.calls, [
+    ["startProxy", { quiet: false, allowAttach: true }],
+    ["printInfo", "Auto-syncing selected models to Droid..."],
+    ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
+    ["printWarning", "Proxy started, but model auto-sync failed: disk write failed"],
+  ]);
+  assert.deepEqual(result, {
+    running: true,
+    started: true,
+    attached: true,
+    syncResult: {
+      success: false,
+      reason: "auto_sync_failed",
+      message: "disk write failed",
+    },
+  });
 });
 
 test("routes login/connect with automatic model sync defaults", async () => {
