@@ -13,6 +13,7 @@ const THINKING_MODE_VALUES = helpers.THINKING_MODE_VALUES;
 const normalizeThinkingMode = helpers.normalizeThinkingMode;
 const normalizeThinkingModelModes = helpers.normalizeThinkingModelModes;
 const stripThinkingSuffix = helpers.stripThinkingSuffix;
+const THINKING_MODE_HISTORY_LIMIT = 5;
 
 function getProvidersWithStatus(login, configValues) {
   if (login && typeof login.getProvidersWithConnectionStatus === "function") {
@@ -21,6 +22,18 @@ function getProvidersWithStatus(login, configValues) {
       return rows.map((provider) => ({
         ...provider,
         connected: provider.connected === true,
+        connectionState:
+          provider && provider.connectionState === "connected"
+            ? "connected"
+            : provider && provider.connectionState === "disconnected"
+              ? "disconnected"
+              : provider && Object.prototype.hasOwnProperty.call(provider, "connected")
+                ? provider.connected === true
+                  ? "connected"
+                  : "disconnected"
+              : provider && provider.connected === true
+                ? "connected"
+                : "unknown",
       }));
     }
   }
@@ -29,11 +42,15 @@ function getProvidersWithStatus(login, configValues) {
   return providers.map((provider) => ({
     ...provider,
     connected: false,
+    connectionState: "unknown",
   }));
 }
 
 function getConnectedProvidersWithStatus(login, configValues) {
-  return getProvidersWithStatus(login, configValues).filter((provider) => provider.connected);
+  return getProvidersWithStatus(login, configValues).filter((provider) => (
+    provider.connected ||
+    provider.connectionState === "unknown"
+  ));
 }
 
 function formatProviderMenuItem(provider) {
@@ -89,13 +106,6 @@ function getCustomModelEntries(root) {
   return entries;
 }
 
-function fallbackDroxyManagedCheck(entry) {
-  const label = String(
-    (entry && (entry.displayName || entry.model_display_name || "")) || ""
-  );
-  return label.startsWith("Droxy • ");
-}
-
 function normalizeEntryForProviderResolution(entry) {
   const modelId = normalizeText(
     entry &&
@@ -143,12 +153,8 @@ function readDroidSyncedModelIdsByProvider({ config, sync, fsApi = fs } = {}) {
   for (const filePath of paths) {
     const root = parseJsonFileSafe(fsApi, filePath);
     for (const entry of getCustomModelEntries(root)) {
-      let managed = false;
-      if (typeof sync.isDroxyManagedEntry === "function" && host && port) {
-        managed = sync.isDroxyManagedEntry(entry, host, port);
-      } else {
-        managed = fallbackDroxyManagedCheck(entry);
-      }
+      if (typeof sync.isDroxyManagedEntry !== "function" || !host || !port) continue;
+      const managed = sync.isDroxyManagedEntry(entry, host, port);
       if (!managed) continue;
 
       const normalizedEntry = normalizeEntryForProviderResolution(entry);
@@ -203,10 +209,75 @@ function resolveThinkingModelModes(thinkingModels, existingThinkingModelModes = 
   return output;
 }
 
+function normalizeThinkingModelModeHistory(thinkingModelModeHistory = {}, options = {}) {
+  const maxEntriesRaw =
+    options && typeof options === "object" && Number.isFinite(options.maxEntries)
+      ? Number(options.maxEntries)
+      : THINKING_MODE_HISTORY_LIMIT;
+  const maxEntries = Math.max(1, Math.floor(maxEntriesRaw));
+  const output = {};
+  if (!thinkingModelModeHistory || typeof thinkingModelModeHistory !== "object") return output;
+  for (const [modelId, modes] of Object.entries(thinkingModelModeHistory)) {
+    const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
+    if (!normalizedModelId) continue;
+    const modeList = Array.isArray(modes) ? modes : [modes];
+    const dedupedModes = [];
+    const seenModes = new Set();
+    for (const mode of modeList) {
+      const normalizedMode = normalizeThinkingMode(mode);
+      if (!normalizedMode || normalizedMode === "none" || seenModes.has(normalizedMode)) continue;
+      dedupedModes.push(normalizedMode);
+      seenModes.add(normalizedMode);
+      if (dedupedModes.length >= maxEntries) break;
+    }
+    if (!dedupedModes.length) continue;
+    output[normalizedModelId] = dedupedModes;
+  }
+  return output;
+}
+
+function resolveThinkingModeFromHistory(thinkingModelModeHistory = {}, modelId = "") {
+  const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
+  if (!normalizedModelId) return "";
+  const historyLookup = normalizeThinkingModelModeHistory(thinkingModelModeHistory);
+  const modes = Array.isArray(historyLookup[normalizedModelId]) ? historyLookup[normalizedModelId] : [];
+  return modes.length ? modes[0] : "";
+}
+
+function updateThinkingModelModeHistory(thinkingModelModeHistory = {}, modelId, mode, options = {}) {
+  const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
+  const normalizedMode = normalizeThinkingMode(mode);
+  const normalizedHistory = normalizeThinkingModelModeHistory(thinkingModelModeHistory, options);
+  if (!normalizedModelId || !normalizedMode || normalizedMode === "none") return normalizedHistory;
+  const maxEntriesRaw =
+    options && typeof options === "object" && Number.isFinite(options.maxEntries)
+      ? Number(options.maxEntries)
+      : THINKING_MODE_HISTORY_LIMIT;
+  const maxEntries = Math.max(1, Math.floor(maxEntriesRaw));
+  const existingModes = Array.isArray(normalizedHistory[normalizedModelId])
+    ? normalizedHistory[normalizedModelId]
+    : [];
+  const nextModes = [normalizedMode].concat(existingModes.filter((value) => value !== normalizedMode));
+  normalizedHistory[normalizedModelId] = nextModes.slice(0, maxEntries);
+  return normalizedHistory;
+}
+
 function thinkingModeTitleCase(mode) {
   const normalized = normalizeThinkingMode(mode);
   if (!normalized) return "Medium";
   return `${normalized[0].toUpperCase()}${normalized.slice(1)}`;
+}
+
+function thinkingModeLabelForModel(modelId, thinkingModelModes = {}, thinkingModelModeHistory = {}) {
+  const modeLookup = normalizeThinkingModelModes(thinkingModelModes);
+  const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
+  const activeMode = modeLookup[normalizedModelId];
+  if (activeMode && activeMode !== "none") {
+    return thinkingModeTitleCase(activeMode);
+  }
+  const fallback = resolveThinkingModeFromHistory(thinkingModelModeHistory, normalizedModelId);
+  if (fallback) return `Off (last: ${thinkingModeTitleCase(fallback)})`;
+  return "Off";
 }
 
 async function promptThinkingModeForModel(menu, modelId, initialMode = "medium") {
@@ -238,6 +309,49 @@ async function promptThinkingModelModes(menu, thinkingModels, initialModes = {})
     output[modelId] = normalizeThinkingMode(nextMode) || "medium";
   }
   return output;
+}
+
+async function promptThinkingManagementAction(
+  menu,
+  { selectedModelsCount = 0, thinkingModelsCount = 0 } = {}
+) {
+  const selection = await menu.selectSingle({
+    title: [
+      "Thinking settings",
+      "",
+      `Selected models: ${selectedModelsCount}`,
+      `Thinking enabled: ${thinkingModelsCount}`,
+    ].join("\n"),
+    items: ["Manage Thinking Modes", "Save & Sync"],
+    initialIndex: 1,
+    hint: "Use ↑/↓ and Enter. Press q to save and continue.",
+  });
+  if (!selection || selection.cancelled) return "save_and_sync";
+  return selection.index === 0 ? "manage_thinking_modes" : "save_and_sync";
+}
+
+async function promptThinkingModelForManagement(
+  menu,
+  selectedModels,
+  thinkingModelModes = {},
+  thinkingModelModeHistory = {}
+) {
+  const modelIds = normalizeModelIds(selectedModels);
+  if (!modelIds.length) return null;
+  const selection = await menu.selectSingle({
+    title: "Choose model for thinking mode",
+    items: modelIds.map(
+      (modelId) =>
+        `${modelId}  ${colorize("·", COLORS.dim)} current: ${thinkingModeLabelForModel(
+          modelId,
+          thinkingModelModes,
+          thinkingModelModeHistory
+        )}`
+    ),
+    hint: "Use ↑/↓ and Enter. Press q to return.",
+  });
+  if (!selection || selection.cancelled) return null;
+  return modelIds[selection.index] || null;
 }
 
 function dedupeModelEntries(entries) {
@@ -327,13 +441,19 @@ module.exports = {
   fetchModelEntriesForSelection,
   getConnectedProvidersWithStatus,
   getProvidersWithStatus,
+  normalizeThinkingModelModeHistory,
   promptModelSelection,
+  promptThinkingManagementAction,
+  promptThinkingModelForManagement,
   promptThinkingModelModes,
   promptThinkingModelSelection,
   promptProviderModelsSelection,
   promptProviderSelection,
   readDroidSyncedModelIdsByProvider,
   readDroidSyncedModelsByProvider,
+  resolveThinkingModeFromHistory,
   resolveThinkingModelModes,
   resolveThinkingModels,
+  THINKING_MODE_HISTORY_LIMIT,
+  updateThinkingModelModeHistory,
 };

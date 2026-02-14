@@ -7,6 +7,7 @@ const ACCOUNT_MENU_ACTIONS = Object.freeze({
 });
 
 function getConnectionCount(provider) {
+  if (provider && provider.connectionState === "unknown" && provider.connected !== true) return 0;
   const count = Number(provider && provider.connectionCount);
   if (Number.isFinite(count) && count > 0) return Math.floor(count);
   return provider && provider.connected ? 1 : 0;
@@ -23,16 +24,39 @@ function formatProviderStatusLine(provider) {
   const id = provider && provider.id ? provider.id : "unknown";
   const connectionCount = getConnectionCount(provider);
   const countSuffix = connectionCount > 1 ? ` (${connectionCount})` : "";
-  const status = provider && provider.connected ? `Connected${countSuffix}` : "Not connected";
+  const connectionState =
+    provider && provider.connectionState === "connected"
+      ? "connected"
+      : provider && provider.connectionState === "disconnected"
+        ? "disconnected"
+        : provider && Object.prototype.hasOwnProperty.call(provider, "connected")
+          ? provider.connected === true
+            ? "connected"
+            : "disconnected"
+        : provider && provider.connected === true
+          ? "connected"
+          : "unknown";
+  const status =
+    connectionState === "connected"
+      ? `Connected${countSuffix}`
+      : connectionState === "disconnected"
+        ? "Not connected"
+        : "Unknown (unverified)";
   return `- ${label} (${id}): ${status}`;
 }
 
 function buildAccountsTitle(output, providers) {
   const rows = Array.isArray(providers) ? providers : [];
   const connected = rows.filter((provider) => provider && provider.connected).length;
+  const unknown = rows.filter((provider) =>
+    provider &&
+    provider.connected !== true &&
+    String(provider.connectionState || "").toLowerCase() === "unknown"
+  ).length;
   const lines = [
     output.accent("Accounts"),
     output.dim(`Connected providers: ${connected}/${rows.length}`),
+    output.dim(`Unverified providers: ${unknown}`),
     "",
   ];
 
@@ -70,10 +94,16 @@ function buildConnectedAccountsTitle(output, providers) {
   const rows = Array.isArray(providers) ? providers : [];
   const connectedRows = rows.filter((provider) => provider && provider.connected);
   const connectedAccountTotal = getConnectedAccountTotal(rows);
+  const unknownRows = rows.filter((provider) =>
+    provider &&
+    provider.connected !== true &&
+    String(provider.connectionState || "").toLowerCase() === "unknown"
+  );
   const lines = [
     output.accent("Connected Accounts"),
     output.dim(`Connected accounts: ${connectedAccountTotal}`),
     output.dim(`Connected providers: ${connectedRows.length}/${rows.length}`),
+    output.dim(`Unverified providers: ${unknownRows.length}`),
     "",
   ];
   if (!connectedRows.length) {

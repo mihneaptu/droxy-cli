@@ -1,30 +1,36 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
 const test = require("node:test");
 
 const login = require("../src/login");
 
-test("getProvidersWithConnectionStatus marks providers from auth artifacts", () => {
-  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), "droxy-login-auth-"));
-  try {
-    fs.writeFileSync(path.join(authDir, "anthropic-session.json"), "{}", "utf8");
-    fs.writeFileSync(path.join(authDir, "openai-token.json"), "{}", "utf8");
-    fs.writeFileSync(path.join(authDir, "openai-token-backup.json"), "{}", "utf8");
+test("getProvidersWithConnectionStatus defaults providers to unknown when unverified", () => {
+  const rows = login.getProvidersWithConnectionStatus({});
+  const byId = new Map(rows.map((provider) => [provider.id, provider]));
+  assert.equal(byId.get("claude").connected, false);
+  assert.equal(byId.get("claude").connectionState, "unknown");
+  assert.equal(byId.get("claude").connectionCount, 0);
+  assert.equal(byId.get("codex").connected, false);
+  assert.equal(byId.get("codex").connectionState, "unknown");
+  assert.equal(byId.get("codex").connectionCount, 0);
+});
 
-    const rows = login.getProvidersWithConnectionStatus({ authDir });
-    const byId = new Map(rows.map((provider) => [provider.id, provider]));
-
-    assert.equal(byId.get("claude").connected, true);
-    assert.equal(byId.get("claude").connectionCount, 1);
-    assert.equal(byId.get("codex").connected, true);
-    assert.equal(byId.get("codex").connectionCount, 2);
-    assert.equal(byId.get("gemini").connected, false);
-    assert.equal(byId.get("gemini").connectionCount, 0);
-  } finally {
-    fs.rmSync(authDir, { recursive: true, force: true });
-  }
+test("getProvidersWithConnectionStatus respects explicit providerStatusById overrides", () => {
+  const rows = login.getProvidersWithConnectionStatus({
+    providerStatusById: {
+      claude: { connectionState: "connected", connectionCount: 2, verified: true },
+      codex: false,
+      gemini: "unknown",
+    },
+  });
+  const byId = new Map(rows.map((provider) => [provider.id, provider]));
+  assert.equal(byId.get("claude").connected, true);
+  assert.equal(byId.get("claude").connectionState, "connected");
+  assert.equal(byId.get("claude").connectionCount, 2);
+  assert.equal(byId.get("codex").connected, false);
+  assert.equal(byId.get("codex").connectionState, "disconnected");
+  assert.equal(byId.get("codex").connectionCount, 0);
+  assert.equal(byId.get("gemini").connected, false);
+  assert.equal(byId.get("gemini").connectionState, "unknown");
 });

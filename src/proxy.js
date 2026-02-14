@@ -6,18 +6,9 @@ const { spawn } = require("child_process");
 
 const configModule = require("./config");
 const helpersModule = require("./helpers");
+const syncModule = require("./sync");
 const outputModule = require("./ui/output");
 const { formatDuration } = require("./ui/animations");
-
-const AUTH_HINTS = {
-  gemini: ["gemini", "google", "aistudio"],
-  codex: ["codex", "openai"],
-  claude: ["claude", "anthropic"],
-  qwen: ["qwen"],
-  kimi: ["kimi", "moonshot"],
-  iflow: ["iflow"],
-  antigravity: ["antigravity"],
-};
 
 function resolveBinaryCandidates(baseDir, isWindows) {
   const primary = path.join(
@@ -33,6 +24,7 @@ function createProxyApi(overrides = {}) {
   const spawnFn = overrides.spawn || spawn;
   const config = overrides.config || configModule;
   const helpers = overrides.helpers || helpersModule;
+  const sync = overrides.sync || syncModule;
   const output = overrides.output || outputModule;
 
   function getBinaryPath() {
@@ -67,17 +59,12 @@ function createProxyApi(overrides = {}) {
     }
   }
 
-  function hasProviderAuth(providerId, files) {
-    const hints = AUTH_HINTS[providerId] || [providerId];
-    return files.some((name) =>
-      hints.some((hint) => String(name).toLowerCase().includes(String(hint).toLowerCase()))
-    );
+  function hasProviderAuth() {
+    return false;
   }
 
-  function countConnectedProviders(authDir) {
-    const files = listAuthFiles(authDir).map((file) => file.toLowerCase());
-    return Object.keys(AUTH_HINTS).filter((providerId) => hasProviderAuth(providerId, files))
-      .length;
+  function countConnectedProviders() {
+    return 0;
   }
 
   async function getProxyStatus(host, port) {
@@ -308,6 +295,17 @@ function createProxyApi(overrides = {}) {
     const values = config.readConfigValues();
     const status = await getProxyStatus(values.host, values.port);
     const state = config.readState() || {};
+    const providerStatus =
+      sync && typeof sync.fetchProviderConnectionStatusSafe === "function"
+        ? await sync.fetchProviderConnectionStatusSafe(values, { state, quiet: true })
+        : { providersState: "unknown", providersConnected: 0, byProvider: {} };
+    const providersConnectedRaw = Number(providerStatus && providerStatus.providersConnected);
+    const providersConnected =
+      Number.isFinite(providersConnectedRaw) && providersConnectedRaw >= 0
+        ? Math.floor(providersConnectedRaw)
+        : 0;
+    const providersState =
+      providerStatus && providerStatus.providersState === "verified" ? "verified" : "unknown";
 
     if (check) {
       if (!status.running) process.exitCode = 1;
@@ -324,7 +322,6 @@ function createProxyApi(overrides = {}) {
     }
 
     const statusState = status.blocked ? "blocked" : status.running ? "running" : "stopped";
-    const providers = countConnectedProviders(config.resolveAuthDir(values.authDir));
     const data = {
       status: statusState,
       host: values.host,
@@ -332,7 +329,9 @@ function createProxyApi(overrides = {}) {
       config: config.getConfigPath(),
       pid: status.pid || null,
       uptime,
-      providers,
+      providers: providersConnected,
+      providersConnected,
+      providersState,
     };
 
     if (json) {
@@ -343,7 +342,7 @@ function createProxyApi(overrides = {}) {
     if (!quiet) {
       output.log(`Status:    ${statusState}`);
       output.log(`Endpoint:  ${(values.tlsEnabled ? "https" : "http")}://${values.host}:${values.port}/v1`);
-      output.log(`Providers: ${providers}`);
+      output.log(`Providers: ${providersConnected} (${providersState})`);
       if (status.pid) output.log(`PID:       ${status.pid}`);
       if (uptime) output.log(`Uptime:    ${uptime}`);
       if (verbose) {

@@ -6,19 +6,25 @@ const syncModule = require("../sync");
 const menuModule = require("../ui/menu");
 const outputModule = require("../ui/output");
 const { Spinner } = require("../ui/spinner");
+const { normalizeThinkingMode } = require("../helpers");
 const { autoSyncSelectedModelsIfDrifted } = require("./interactiveAutoSync");
 const { getMenuContext, promptHomeAction } = require("./interactiveHome");
 const { createInteractiveProviderActions } = require("./interactiveProviderActions");
 const {
   fetchModelEntriesForSelection,
   getConnectedProvidersWithStatus,
+  normalizeThinkingModelModeHistory,
   promptModelSelection,
+  promptThinkingManagementAction,
+  promptThinkingModelForManagement,
   promptThinkingModelModes,
   promptThinkingModelSelection,
   promptProviderModelsSelection,
   readDroidSyncedModelIdsByProvider,
+  resolveThinkingModeFromHistory,
   resolveThinkingModelModes,
   resolveThinkingModels,
+  updateThinkingModelModeHistory,
 } = require("./interactiveSelection");
 const {
   buildProviderModelGroups,
@@ -56,6 +62,7 @@ function createInteractiveApi(overrides = {}) {
     now,
     output,
     proxy,
+    sync,
   });
 
   function readPersistedModelsByProvider(state = {}) {
@@ -120,13 +127,92 @@ function createInteractiveApi(overrides = {}) {
       return { success: false, reason: "no_models" };
     }
 
+    const detectedModelIds = normalizeModelIds(
+      modelEntries.map((entry) => (entry && entry.id ? entry.id : ""))
+    );
+    const detectedModelIdsByLower = new Map(
+      detectedModelIds.map((modelId) => [String(modelId).toLowerCase(), modelId])
+    );
+    const projectIdsToDetectedModels = (ids, allowedSet = null) => {
+      const projected = [];
+      for (const modelId of normalizeModelIds(ids || [])) {
+        const canonicalId = detectedModelIdsByLower.get(String(modelId).toLowerCase());
+        if (!canonicalId) continue;
+        if (allowedSet && !allowedSet.has(canonicalId)) continue;
+        projected.push(canonicalId);
+      }
+      return normalizeModelIds(projected);
+    };
+
+    const stateAtLoadRaw = config.readState() || {};
+    const selectedBeforePrune = normalizeModelIds(stateAtLoadRaw.selectedModels || []);
+    const selectedAfterPrune = projectIdsToDetectedModels(selectedBeforePrune);
+    const selectedAfterPruneSet = new Set(selectedAfterPrune);
+    const thinkingBeforePrune = normalizeModelIds(stateAtLoadRaw.thinkingModels || []);
+    const thinkingAfterPrune = projectIdsToDetectedModels(
+      thinkingBeforePrune,
+      selectedAfterPruneSet
+    );
+    const thinkingModesBeforePrune =
+      stateAtLoadRaw.thinkingModelModes && typeof stateAtLoadRaw.thinkingModelModes === "object"
+        ? stateAtLoadRaw.thinkingModelModes
+        : {};
+    const thinkingModesAfterPrune = {};
+    for (const [modelId, mode] of Object.entries(thinkingModesBeforePrune)) {
+      const canonicalId = detectedModelIdsByLower.get(String(modelId || "").trim().toLowerCase());
+      if (!canonicalId) continue;
+      if (!selectedAfterPruneSet.has(canonicalId)) continue;
+      thinkingModesAfterPrune[canonicalId] = mode;
+    }
+
+    const staleSelectedCount = selectedBeforePrune.length - selectedAfterPrune.length;
+    const staleThinkingCount = thinkingBeforePrune.length - thinkingAfterPrune.length;
+    const staleThinkingModeCount =
+      Object.keys(thinkingModesBeforePrune).length - Object.keys(thinkingModesAfterPrune).length;
+    const staleStateDetected =
+      staleSelectedCount > 0 ||
+      staleThinkingCount > 0 ||
+      staleThinkingModeCount > 0;
+
+    const stateAtLoad = staleStateDetected
+      ? config.updateState({
+          selectedModels: selectedAfterPrune,
+          thinkingModels: thinkingAfterPrune,
+          thinkingModelModes: thinkingModesAfterPrune,
+          lastInteractiveActionAt: now(),
+        })
+      : stateAtLoadRaw;
+
+    if (staleSelectedCount > 0) {
+      output.printInfo(
+        `Removed ${staleSelectedCount} stale selected model${staleSelectedCount === 1 ? "" : "s"} not present in your current /v1/models list.`
+      );
+    }
+    if (staleThinkingCount > 0 || staleThinkingModeCount > 0) {
+      output.printInfo(
+        "Pruned stale thinking settings that are no longer available for your current account."
+      );
+    }
+
     const values = config.readConfigValues();
+    let providerStatusById = {};
+    if (sync && typeof sync.fetchProviderConnectionStatusSafe === "function") {
+      const providerStatus = await sync.fetchProviderConnectionStatusSafe(values, {
+        state: stateAtLoad,
+        quiet: true,
+      });
+      if (providerStatus && providerStatus.byProvider && typeof providerStatus.byProvider === "object") {
+        providerStatusById = providerStatus.byProvider;
+      }
+    }
     const providerGroups = buildProviderModelGroups(
       modelEntries,
-      getConnectedProvidersWithStatus(login, values)
+      getConnectedProvidersWithStatus(login, {
+        ...values,
+        providerStatusById,
+      })
     );
     const syncedModelIdsByProvider = readDroidSyncedModelIdsByProviderFn({ config, sync });
-    const stateAtLoad = config.readState() || {};
     const persistedByProvider = readPersistedModelsByProvider(stateAtLoad);
     const syncedByProvider = Object.fromEntries(
       providerGroups.map((group) => {
@@ -140,8 +226,8 @@ function createInteractiveApi(overrides = {}) {
     );
     if (!providerGroups.length) {
       output.printGuidedError({
-        what: "No connected providers with detected models.",
-        why: "Model picker only shows providers that are currently connected.",
+        what: "No providers with detected models.",
+        why: "Model picker only shows providers with explicit model metadata.",
         next: [
           "Use menu action: Connect Provider",
           "Then retry: Choose Models",
@@ -198,39 +284,114 @@ function createInteractiveApi(overrides = {}) {
     }
 
     const currentState = config.readState() || {};
+    const selectedModelSet = new Set(selectedModels);
+    const existingSelectedModelSet = new Set(existingSelectedModels);
+    const newlyAddedModels = selectedModels.filter((modelId) => !existingSelectedModelSet.has(modelId));
     const existingThinkingModels = normalizeModelIds(currentState.thinkingModels || []).filter((modelId) =>
-      selectedModels.includes(modelId)
+      selectedModelSet.has(modelId)
     );
     const existingThinkingModelModes =
       currentState.thinkingModelModes && typeof currentState.thinkingModelModes === "object"
         ? currentState.thinkingModelModes
         : {};
-    const hasSavedThinkingSelection = Array.isArray(currentState.thinkingModels);
-    const initialThinkingModels = resolveThinkingModels(
-      selectedModels,
+    const existingThinkingModelModeHistory =
+      currentState.thinkingModelModeHistory && typeof currentState.thinkingModelModeHistory === "object"
+        ? currentState.thinkingModelModeHistory
+        : {};
+    let thinkingModelModeHistory = normalizeThinkingModelModeHistory(existingThinkingModelModeHistory);
+    let effectiveThinkingModelModes = resolveThinkingModelModes(
       existingThinkingModels,
-      { hasSavedThinkingSelection }
-    );
-    const thinkingSelection = await promptThinkingModelSelection(
-      menu,
-      selectedModels,
-      initialThinkingModels
-    );
-    const thinkingModels =
-      thinkingSelection && !thinkingSelection.cancelled
-        ? normalizeModelIds(thinkingSelection.selected)
-        : existingThinkingModels;
-    const initialThinkingModelModes = resolveThinkingModelModes(
-      thinkingModels,
       existingThinkingModelModes
     );
-    const thinkingModelModes = await promptThinkingModelModes(
-      menu,
-      thinkingModels,
-      initialThinkingModelModes
+
+    const initialNewThinkingModels = resolveThinkingModels(
+      newlyAddedModels,
+      [],
+      { hasSavedThinkingSelection: false }
     );
-    const effectiveThinkingModelModes = Object.fromEntries(
-      Object.entries(thinkingModelModes).filter(([, mode]) => mode !== "none")
+    let newThinkingModels = [];
+    if (newlyAddedModels.length) {
+      const thinkingSelection = await promptThinkingModelSelection(
+        menu,
+        newlyAddedModels,
+        initialNewThinkingModels
+      );
+      newThinkingModels =
+        thinkingSelection && !thinkingSelection.cancelled
+          ? normalizeModelIds(thinkingSelection.selected)
+          : [];
+    }
+
+    if (newThinkingModels.length) {
+      const initialNewThinkingModelModes = {};
+      for (const modelId of newThinkingModels) {
+        initialNewThinkingModelModes[modelId] =
+          effectiveThinkingModelModes[modelId] ||
+          resolveThinkingModeFromHistory(thinkingModelModeHistory, modelId) ||
+          "medium";
+      }
+      const newThinkingModelModes = await promptThinkingModelModes(
+        menu,
+        newThinkingModels,
+        initialNewThinkingModelModes
+      );
+      for (const [modelId, mode] of Object.entries(newThinkingModelModes)) {
+        const normalizedMode = normalizeThinkingMode(mode) || "medium";
+        if (normalizedMode === "none") {
+          delete effectiveThinkingModelModes[modelId];
+          continue;
+        }
+        effectiveThinkingModelModes[modelId] = normalizedMode;
+        thinkingModelModeHistory = updateThinkingModelModeHistory(
+          thinkingModelModeHistory,
+          modelId,
+          normalizedMode
+        );
+      }
+    }
+
+    while (selectedModels.length) {
+      const action = await promptThinkingManagementAction(menu, {
+        selectedModelsCount: selectedModels.length,
+        thinkingModelsCount: Object.keys(effectiveThinkingModelModes).length,
+      });
+      if (action !== "manage_thinking_modes") break;
+      const modelId = await promptThinkingModelForManagement(
+        menu,
+        selectedModels,
+        effectiveThinkingModelModes,
+        thinkingModelModeHistory
+      );
+      if (!modelId) continue;
+
+      const initialMode =
+        effectiveThinkingModelModes[modelId] ||
+        resolveThinkingModeFromHistory(thinkingModelModeHistory, modelId) ||
+        "medium";
+      const nextModeMap = await promptThinkingModelModes(
+        menu,
+        [modelId],
+        { [modelId]: initialMode }
+      );
+      const nextMode = normalizeThinkingMode(nextModeMap[modelId]) || initialMode;
+      if (nextMode === "none") {
+        delete effectiveThinkingModelModes[modelId];
+        output.printSuccess(`Thinking disabled for ${modelId}.`);
+        continue;
+      }
+      effectiveThinkingModelModes[modelId] = nextMode;
+      thinkingModelModeHistory = updateThinkingModelModeHistory(
+        thinkingModelModeHistory,
+        modelId,
+        nextMode
+      );
+      output.printSuccess(`Thinking mode saved for ${modelId}: ${nextMode}.`);
+    }
+
+    effectiveThinkingModelModes = Object.fromEntries(
+      Object.entries(effectiveThinkingModelModes).filter(
+        ([modelId, mode]) => selectedModelSet.has(modelId) && mode !== "none"
+      )
     );
     const effectiveThinkingModels = normalizeModelIds(Object.keys(effectiveThinkingModelModes));
 
@@ -238,6 +399,7 @@ function createInteractiveApi(overrides = {}) {
       selectedModels,
       thinkingModels: effectiveThinkingModels,
       thinkingModelModes: effectiveThinkingModelModes,
+      thinkingModelModeHistory,
       lastInteractiveActionAt: now(),
     });
 

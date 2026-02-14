@@ -109,6 +109,15 @@ const UNSUPPORTED_MODEL_HINTS = Object.freeze([
   "not allowed",
   "denied",
 ]);
+const PROVIDER_ID_ALIASES = Object.freeze({
+  antigravity: ["antigravity"],
+  claude: ["claude", "anthropic"],
+  codex: ["codex", "openai"],
+  gemini: ["gemini", "google", "aistudio"],
+  iflow: ["iflow"],
+  kimi: ["kimi", "moonshot"],
+  qwen: ["qwen"],
+});
 
 function createSyncApi(overrides = {}) {
   const fsApi = overrides.fs || fs;
@@ -1081,6 +1090,97 @@ function createSyncApi(overrides = {}) {
     return Array.from(excluded);
   }
 
+  function normalizeProviderIdStrict(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (!normalized) return "";
+    for (const [providerId, aliases] of Object.entries(PROVIDER_ID_ALIASES)) {
+      if (aliases.includes(normalized)) return providerId;
+    }
+    return "";
+  }
+
+  function parseConnectionBoolean(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") return true;
+      if (normalized === "false") return false;
+    }
+    return null;
+  }
+
+  function parseAuthFileConnectionState(file) {
+    if (!file || typeof file !== "object") return "unknown";
+
+    for (const key of [
+      "connected",
+      "is_connected",
+      "authenticated",
+      "is_authenticated",
+      "authorized",
+      "is_authorized",
+      "logged_in",
+      "is_logged_in",
+    ]) {
+      const parsed = parseConnectionBoolean(file[key]);
+      if (parsed === true) return "connected";
+      if (parsed === false) return "disconnected";
+    }
+
+    const statusToken = normalizeStatusToken(
+      file.connection_state || file.connectionState || file.auth_state || file.authState || file.status || file.state
+    );
+    if (statusToken === "connected" || statusToken === "authenticated" || statusToken === "authorized") {
+      return "connected";
+    }
+    if (
+      statusToken === "disconnected" ||
+      statusToken === "unauthenticated" ||
+      statusToken === "unauthorized" ||
+      statusToken === "expired" ||
+      statusToken === "invalid"
+    ) {
+      return "disconnected";
+    }
+
+    return "unknown";
+  }
+
+  function parseAuthFilesProviderConnections(payload) {
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.files)) {
+      return { providersState: "unknown", providersConnected: 0, byProvider: {} };
+    }
+
+    const byProvider = {};
+    const scoreByProvider = {};
+    for (const file of payload.files) {
+      if (!file || typeof file !== "object") continue;
+      const providerId = normalizeProviderIdStrict(file.provider || file.type || file.provider_id || file.providerId);
+      if (!providerId) continue;
+      const state = parseAuthFileConnectionState(file);
+      if (!scoreByProvider[providerId]) scoreByProvider[providerId] = 0;
+      const nextScore = state === "connected" ? 2 : state === "disconnected" ? 1 : 0;
+      if (nextScore < scoreByProvider[providerId]) continue;
+      scoreByProvider[providerId] = nextScore;
+      byProvider[providerId] = {
+        connected: state === "connected",
+        connectionState: state,
+        verified: state !== "unknown",
+      };
+    }
+
+    const providersConnected = Object.values(byProvider).filter((provider) => provider.connected).length;
+    return {
+      providersState: "verified",
+      providersConnected,
+      byProvider,
+    };
+  }
+
   async function fetchAuthFilesModelExclusions({
     configValues,
     protocol,
@@ -1093,6 +1193,45 @@ function createSyncApi(overrides = {}) {
       managementKey,
     });
     return parseAuthFilesModelExclusions(payload);
+  }
+
+  async function fetchProviderConnectionStatus(configValues, options = {}) {
+    let state = {};
+    if (
+      Object.prototype.hasOwnProperty.call(options, "state") &&
+      options.state &&
+      typeof options.state === "object"
+    ) {
+      state = options.state;
+    } else if (config && typeof config.readState === "function") {
+      state = config.readState() || {};
+    }
+
+    const managementKey = resolveManagementKey(configValues, state, options);
+    if (!managementKey) {
+      return { providersState: "unknown", providersConnected: 0, byProvider: {} };
+    }
+
+    const protocol =
+      (options && typeof options.protocol === "string" && options.protocol) ||
+      configuredProtocol(configValues);
+
+    const payload = await requestManagementJson({
+      configValues,
+      protocol,
+      suffix: MANAGEMENT_AUTH_FILES_PATH,
+      managementKey,
+    });
+    if (!payload) return { providersState: "unknown", providersConnected: 0, byProvider: {} };
+    return parseAuthFilesProviderConnections(payload);
+  }
+
+  async function fetchProviderConnectionStatusSafe(configValues, options = {}) {
+    try {
+      return await fetchProviderConnectionStatus(configValues, options);
+    } catch {
+      return { providersState: "unknown", providersConnected: 0, byProvider: {} };
+    }
   }
 
   function filterExcludedModelEntries(entries, excludedModelIds) {
@@ -1733,6 +1872,8 @@ function createSyncApi(overrides = {}) {
     fetchAvailableModelEntries,
     fetchAvailableModelEntriesSafe,
     fetchManagementModelExclusions,
+    fetchProviderConnectionStatus,
+    fetchProviderConnectionStatusSafe,
     filterEligibleModelEntries,
     filterExcludedModelEntries,
     filterDetectedEntriesBySelection,
@@ -1740,6 +1881,7 @@ function createSyncApi(overrides = {}) {
     isDroxyManagedEntry,
     isModelEligible,
     parseAuthFilesModelExclusions,
+    parseAuthFilesProviderConnections,
     parseUnsupportedModelIdsFromStatusMessage,
     normalizeSelectedModelIds,
     resolveReachableProtocol,

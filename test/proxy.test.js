@@ -78,3 +78,41 @@ test("startProxy returns config_missing when no config exists", async () => {
     cleanup();
   }
 });
+
+test("statusProxy includes provider verification fields", async () => {
+  const api = proxy.createProxyApi({
+    config: {
+      configExists: () => true,
+      getConfigPath: () => "C:/tmp/config.yaml",
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 65530,
+        tlsEnabled: false,
+        authDir: "~/.cli-proxy-api",
+      }),
+      readState: () => ({}),
+      resolveAuthDir: (value) => value,
+    },
+    helpers: {
+      checkPort: async () => false,
+      isWindows: () => false,
+      formatErrorSummary: (value) => String(value || ""),
+    },
+    output: {
+      log: () => {},
+      printWarning: () => {},
+    },
+    sync: {
+      fetchProviderConnectionStatusSafe: async () => ({
+        providersState: "verified",
+        providersConnected: 3,
+        byProvider: {},
+      }),
+    },
+  });
+
+  const result = await api.statusProxy({ quiet: true });
+  assert.equal(result.providers, 3);
+  assert.equal(result.providersConnected, 3);
+  assert.equal(result.providersState, "verified");
+});

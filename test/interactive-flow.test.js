@@ -135,6 +135,7 @@ test("interactive mode chooses provider-first models and syncs merged selection"
     true
   );
   assert.match(selectMultipleCalls[1].title, /Choose thinking models/i);
+  assert.deepEqual(getSelectableValues(selectMultipleCalls[1].items), ["gpt-5"]);
   assert.equal(
     selectSingleCalls.some((call) => /Thinking mode\s+•\s+gpt-5/i.test(call.title || "")),
     true
@@ -156,6 +157,7 @@ test("choose models auto-sync clears Droid when selection is empty", async () =>
   let state = {
     apiKey: "k",
     selectedModels: ["gpt-5"],
+    thinkingModelModeHistory: { "gpt-5": ["high", "medium"] },
   };
   const singleSelections = [{ index: 2 }, { index: 0 }];
 
@@ -229,6 +231,97 @@ test("choose models auto-sync clears Droid when selection is empty", async () =>
     true
   );
   assert.deepEqual(state.selectedModels, []);
+  assert.deepEqual(state.thinkingModelModeHistory, { "gpt-5": ["high", "medium"] });
+});
+
+test("manage thinking modes updates active mode and history for existing models", async () => {
+  const syncCalls = [];
+  const selectSingleCalls = [];
+  let state = {
+    apiKey: "k",
+    selectedModels: ["claude-opus", "gpt-5"],
+    thinkingModels: ["gpt-5"],
+    thinkingModelModes: { "gpt-5": "high" },
+    thinkingModelModeHistory: { "gpt-5": ["high", "medium"] },
+  };
+  const singleSelections = [{ index: 2 }, { index: 1 }, { index: 0 }, { index: 1 }, { index: 2 }, { index: 1 }];
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => state,
+      updateState: (partial) => {
+        state = { ...state, ...partial };
+        return state;
+      },
+      configExists: () => true,
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [
+        { id: "claude", label: "Claude (Anthropic)" },
+        { id: "codex", label: "OpenAI / Codex" },
+      ],
+      getProvidersWithConnectionStatus: () => [
+        { id: "claude", label: "Claude (Anthropic)", connected: true },
+        { id: "codex", label: "OpenAI / Codex", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async (payload) => {
+        if (/Choose models/i.test(payload.title)) {
+          return { cancelled: false, selected: getSelectableValues(payload.items) };
+        }
+        return { cancelled: true, selected: [] };
+      },
+      selectSingle: async (payload) => {
+        selectSingleCalls.push(payload);
+        const next = singleSelections.shift() || { index: payload.items.length - 1 };
+        return { cancelled: false, value: "", ...next };
+      },
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [
+        { id: "gpt-5", provider: "openai" },
+        { id: "claude-opus", provider: "anthropic" },
+      ],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async (opts) => {
+        syncCalls.push(opts);
+        return { success: true, result: { status: "synced", modelsAdded: opts.selectedModels.length } };
+      },
+    },
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(selectSingleCalls.some((payload) => /Thinking settings/i.test(String(payload.title || ""))), true);
+  assert.equal(
+    selectSingleCalls.some((payload) => /Choose model for thinking mode/i.test(String(payload.title || ""))),
+    true
+  );
+  assert.deepEqual(state.thinkingModels, ["gpt-5"]);
+  assert.deepEqual(state.thinkingModelModes, { "gpt-5": "low" });
+  assert.deepEqual(state.thinkingModelModeHistory, { "gpt-5": ["low", "high", "medium"] });
+  assert.equal(syncCalls.length, 1);
 });
 
 test("interactive home auto-syncs when selected models drift from Droid state", async () => {
@@ -560,10 +653,104 @@ test("provider model picker prefers Droid-synced defaults over stale local selec
 
   assert.equal(selectSingleCalls.length >= 2, true);
   assert.match(selectSingleCalls[1].items[0], /3 synced/);
-  assert.equal(selectMultipleCalls.length, 2);
+  assert.equal(selectMultipleCalls.length, 1);
   assert.deepEqual(
     selectMultipleCalls[0].initialSelected,
     ["kimi-k2", "kimi-k2-0905", "kimi-k2-thinking"]
+  );
+});
+
+test("choose models prunes stale saved selections to current /v1/models before prompts", async () => {
+  const outputCalls = [];
+  const selectMultipleCalls = [];
+  let state = {
+    selectedModels: ["gpt-5", "o3-old"],
+    thinkingModels: ["gpt-5", "o3-old"],
+    thinkingModelModes: { "gpt-5": "high", "o3-old": "low" },
+    thinkingModelModeHistory: { "gpt-5": ["high"], "o3-old": ["low"] },
+    factory: {
+      modelsByProvider: {
+        codex: ["gpt-5", "o3-old"],
+      },
+    },
+  };
+  const singleSelections = [{ index: 2 }, { index: 0 }, { index: 1 }];
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => state,
+      updateState: (partial) => {
+        state = { ...state, ...partial };
+        return state;
+      },
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "codex", label: "OpenAI / Codex" }],
+      getProvidersWithConnectionStatus: () => [
+        { id: "codex", label: "OpenAI / Codex", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async (payload) => {
+        selectMultipleCalls.push(payload);
+        if (/Choose models/i.test(payload.title)) {
+          return { cancelled: false, selected: payload.initialSelected.slice() };
+        }
+        return { cancelled: true, selected: [] };
+      },
+      selectSingle: async (payload) => {
+        const next = singleSelections.shift() || { index: payload.items.length - 1 };
+        return { cancelled: false, value: "", ...next };
+      },
+    },
+    output: createOutputStub(outputCalls),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [
+        { id: "gpt-5", provider: "openai" },
+      ],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async (opts) => ({
+        success: true,
+        result: { status: "synced", modelsAdded: opts.selectedModels.length },
+      }),
+    },
+    readDroidSyncedModelIdsByProvider: () => ({ codex: [] }),
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(selectMultipleCalls.length, 1);
+  assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5"]);
+  assert.deepEqual(state.selectedModels, ["gpt-5"]);
+  assert.deepEqual(state.thinkingModels, ["gpt-5"]);
+  assert.deepEqual(state.thinkingModelModes, { "gpt-5": "high" });
+  assert.deepEqual(state.thinkingModelModeHistory, { "gpt-5": ["high"], "o3-old": ["low"] });
+  assert.equal(
+    outputCalls.some(
+      (entry) =>
+        entry[0] === "printInfo" &&
+        /Removed 1 stale selected model.*\/v1\/models/i.test(entry[1])
+    ),
+    true
   );
 });
 
@@ -937,6 +1124,101 @@ test("accounts menu can list status and connect account", async () => {
   assert.match(connectedListPrompt.title, /Connected accounts:\s+2/i);
   assert.match(connectedListPrompt.title, /Connected \(2\)/i);
   assert.deepEqual(loginCalls, [{ providerId: "claude", quiet: false }]);
+});
+
+test("accounts menu uses verified provider status from management API when available", async () => {
+  const selectSingleCalls = [];
+  let homePromptCount = 0;
+  let capturedConfigValues = null;
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 8317,
+      }),
+      readState: () => ({ apiKey: "k" }),
+      updateState: () => ({}),
+      configExists: () => true,
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [
+        { id: "claude", label: "Claude (Anthropic)" },
+        { id: "codex", label: "OpenAI / Codex" },
+      ],
+      getProvidersWithConnectionStatus: (configValues) => {
+        capturedConfigValues = configValues;
+        const byProvider = configValues && configValues.providerStatusById
+          ? configValues.providerStatusById
+          : {};
+        return [
+          {
+            id: "claude",
+            label: "Claude (Anthropic)",
+            connected: byProvider.claude && byProvider.claude.connected === true,
+            connectionState: byProvider.claude ? byProvider.claude.connectionState : "unknown",
+          },
+          {
+            id: "codex",
+            label: "OpenAI / Codex",
+            connected: byProvider.codex && byProvider.codex.connected === true,
+            connectionState: byProvider.codex ? byProvider.codex.connectionState : "unknown",
+          },
+        ];
+      },
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async () => ({ cancelled: true, selected: [] }),
+      selectSingle: async (payload) => {
+        selectSingleCalls.push(payload);
+        if (/Droxy Interactive/i.test(payload.title || "")) {
+          homePromptCount += 1;
+          const label = homePromptCount === 1 ? "Accounts" : "Exit";
+          return { cancelled: false, index: payload.items.indexOf(label), value: label };
+        }
+        if (/^Accounts(\r?\n|$)/i.test(payload.title || "")) {
+          return { cancelled: false, index: payload.items.indexOf("Back to Menu"), value: "Back to Menu" };
+        }
+        return { cancelled: true, index: -1, value: "" };
+      },
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      fetchProviderConnectionStatusSafe: async () => ({
+        providersState: "verified",
+        providersConnected: 1,
+        byProvider: {
+          claude: { connected: true, connectionState: "connected", verified: true },
+          codex: { connected: false, connectionState: "disconnected", verified: true },
+        },
+      }),
+      syncDroidSettings: async () => ({ success: true }),
+    },
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(Boolean(capturedConfigValues && capturedConfigValues.providerStatusById), true);
+  assert.equal(capturedConfigValues.providerStatusById.claude.connected, true);
+  assert.equal(capturedConfigValues.providerStatusById.codex.connected, false);
+
+  const accountsPrompt = selectSingleCalls.find((payload) =>
+    /^Accounts(\r?\n|$)/i.test(String(payload.title || ""))
+  );
+  assert.equal(Boolean(accountsPrompt), true);
+  assert.match(accountsPrompt.title, /Connected providers:\s+1\/2/i);
+  assert.match(accountsPrompt.title, /Unverified providers:\s+0/i);
 });
 
 test("interactive mode reports non-interactive sessions", async () => {
