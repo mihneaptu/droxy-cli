@@ -1,6 +1,13 @@
 "use strict";
 
-const { promptAccountsAction, promptConnectedAccountsList } = require("./interactiveAccounts");
+const {
+  formatAccountIdentity: describeAccount,
+  getRemovableAccounts,
+  promptAccountForRemoval,
+  promptAccountRemovalConfirmation,
+  promptAccountsAction,
+  promptConnectedAccountsList,
+} = require("./interactiveAccounts");
 const {
   getProvidersWithStatus,
   promptProviderSelection,
@@ -15,7 +22,7 @@ function createInteractiveProviderActions({
   proxy,
   sync,
 }) {
-  async function readProviderStatuses() {
+  async function readAccountsContext() {
     config.ensureConfig();
     const configValues = config.readConfigValues();
     const state = config.readState() || {};
@@ -29,21 +36,36 @@ function createInteractiveProviderActions({
         providerStatusById = status.byProvider;
       }
     }
-    return getProvidersWithStatus(login, {
-      ...configValues,
+    let accountRows = [];
+    if (sync && typeof sync.fetchManagedAuthFilesSafe === "function") {
+      accountRows = await sync.fetchManagedAuthFilesSafe(configValues, { state, quiet: true });
+      if (!Array.isArray(accountRows)) accountRows = [];
+    }
+    return {
+      configValues,
+      state,
       providerStatusById,
-    });
+      accountRows,
+      providers: getProvidersWithStatus(login, {
+        ...configValues,
+        providerStatusById,
+      }),
+    };
   }
 
   async function connectProviderFlow() {
-    const providers = await readProviderStatuses();
+    const context = await readAccountsContext();
+    const providers = context.providers;
     const provider = await promptProviderSelection(menu, providers);
     if (!provider) {
       output.printInfo("Provider selection cancelled.");
       return { success: false, reason: "cancelled" };
     }
     if (provider.connected) {
-      output.printInfo("Provider already connected. Continuing will refresh login.");
+      const connectionCount = Number(provider.connectionCount) || 1;
+      output.printInfo(
+        `Provider already connected with ${connectionCount} account${connectionCount === 1 ? "" : "s"}. Continuing will refresh login.`
+      );
     }
     const result = await login.loginFlow({
       providerId: provider.id,
@@ -60,21 +82,116 @@ function createInteractiveProviderActions({
     return { success: true, provider: provider.id };
   }
 
+  async function removeAccountFlow(context) {
+    const providers = Array.isArray(context && context.providers) ? context.providers : [];
+    const accountRows = Array.isArray(context && context.accountRows) ? context.accountRows : [];
+    const removable = getRemovableAccounts(accountRows);
+    if (!removable.length) {
+      output.printInfo("No removable accounts found.");
+      return { success: false, reason: "no_removable_accounts" };
+    }
+    const account = await promptAccountForRemoval({
+      menu,
+      output,
+      providers,
+      accountRows,
+    });
+    if (!account) {
+      output.printInfo("Account removal cancelled.");
+      return { success: false, reason: "cancelled" };
+    }
+
+    const confirmed = await promptAccountRemovalConfirmation({
+      menu,
+      output,
+      providers,
+      account,
+    });
+    if (!confirmed) {
+      output.printInfo("Account removal cancelled.");
+      return { success: false, reason: "cancelled" };
+    }
+
+    if (
+      !sync ||
+      (
+        typeof sync.removeManagedAuthFileSafe !== "function" &&
+        typeof sync.removeManagedAuthFile !== "function"
+      )
+    ) {
+      output.printWarning("Account removal is not available for this backend version yet.");
+      return { success: false, reason: "unsupported" };
+    }
+
+    const removeFn =
+      typeof sync.removeManagedAuthFileSafe === "function"
+        ? sync.removeManagedAuthFileSafe.bind(sync)
+        : sync.removeManagedAuthFile.bind(sync);
+
+    const removeResult = await removeFn(
+      context.configValues,
+      {
+        name: account.name,
+        path: account.path,
+        authIndex: account.authIndex,
+        runtimeOnly: account.runtimeOnly,
+      },
+      {
+        state: context.state,
+        quiet: true,
+      }
+    );
+
+    if (removeResult && removeResult.success) {
+      output.printSuccess(`Removed account: ${describeAccount(account)}.`);
+      return { success: true, removed: true };
+    }
+
+    output.printGuidedError({
+      what: "Could not remove account.",
+      why: removeResult && removeResult.message ? removeResult.message : "Management API request failed.",
+      next: [
+        "Run: droxy status --verbose",
+        "Retry in Accounts -> Remove Account",
+      ],
+    });
+    return { success: false, reason: "remove_failed" };
+  }
+
   async function accountsFlow() {
     let exitAccountsMenu = false;
     while (!exitAccountsMenu) {
-      const providers = await readProviderStatuses();
+      const context = await readAccountsContext();
+      const providers = context.providers;
       if (!providers.length) {
         output.printWarning("No providers available for account management.");
         return { success: false, reason: "no_providers" };
       }
-      const action = await promptAccountsAction({ menu, output, providers });
+      const action = await promptAccountsAction({
+        menu,
+        output,
+        providers,
+        accountRows: context.accountRows,
+      });
       if (action === "list_accounts") {
-        await promptConnectedAccountsList({ menu, output, providers });
+        await promptConnectedAccountsList({
+          menu,
+          output,
+          providers,
+          accountRows: context.accountRows,
+        });
         continue;
       }
       if (action === "connect_provider") {
         await connectProviderFlow();
+        continue;
+      }
+      if (action === "refresh_accounts") {
+        output.printSuccess("Refreshed account status.");
+        continue;
+      }
+      if (action === "remove_account") {
+        await removeAccountFlow(context);
         continue;
       }
       exitAccountsMenu = true;

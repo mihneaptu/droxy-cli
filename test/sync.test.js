@@ -810,12 +810,316 @@ test("fetchProviderConnectionStatus reads verified provider connection states fr
   assert.equal(status.providersState, "verified");
   assert.equal(status.providersConnected, 3);
   assert.deepEqual(status.byProvider, {
-    codex: { connected: true, connectionState: "connected", verified: true },
-    claude: { connected: false, connectionState: "disconnected", verified: true },
-    qwen: { connected: true, connectionState: "connected", verified: true },
-    iflow: { connected: false, connectionState: "disconnected", verified: true },
-    gemini: { connected: true, connectionState: "connected", verified: true },
+    codex: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
+    claude: { connected: false, connectionState: "disconnected", verified: true, connectionCount: 0 },
+    qwen: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
+    iflow: { connected: false, connectionState: "disconnected", verified: true, connectionCount: 0 },
+    gemini: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
   });
+});
+
+test("fetchManagedAuthFiles returns normalized multi-account rows", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              path: "C:/auth/openai-main.json",
+              auth_index: 1,
+              account: "Primary",
+              email: "user@example.com",
+              account_type: "chatgpt",
+              status: "connected",
+              status_message: "",
+            },
+            {
+              provider: "gemini-cli",
+              name: "gemini-runtime.json",
+              path: "C:/auth/gemini-runtime.json",
+              runtime_only: true,
+              status: "active",
+              status_message: "",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const rows = await api.fetchManagedAuthFiles(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(Array.isArray(rows), true);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].providerId, "codex");
+  assert.equal(rows[0].connected, true);
+  assert.equal(rows[0].connectionState, "connected");
+  assert.equal(rows[0].removable, true);
+  assert.equal(rows[0].accountType, "chatgpt");
+  assert.equal(rows[1].providerId, "gemini");
+  assert.equal(rows[1].connected, true);
+  assert.equal(rows[1].runtimeOnly, true);
+  assert.equal(rows[1].removable, false);
+});
+
+test("fetchManagedAuthFiles preserves zero auth index values", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-zero.json",
+              path: "C:/auth/openai-zero.json",
+              auth_index: 0,
+              status: "connected",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const rows = await api.fetchManagedAuthFiles(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].authIndex, 0);
+});
+
+test("removeManagedAuthFile uses DELETE auth-files endpoint with name/index query", async () => {
+  let requestMethod = "";
+  let requestName = "";
+  let requestIndex = "";
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": ({ url, options }) => {
+        const parsed = new URL(url);
+        requestMethod = String((options && options.method) || "").toUpperCase();
+        requestName = parsed.searchParams.get("name") || "";
+        requestIndex = parsed.searchParams.get("index") || "";
+        return {
+          statusCode: 200,
+          body: { success: true },
+        };
+      },
+    }),
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "openai-main.json",
+      authIndex: 2,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(requestMethod, "DELETE");
+  assert.equal(requestName, "openai-main.json");
+  assert.equal(requestIndex, "2");
+  assert.equal(result.success, true);
+});
+
+test("removeManagedAuthFile keeps zero auth index in DELETE query", async () => {
+  let requestIndex = "";
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": ({ url }) => {
+        const parsed = new URL(url);
+        requestIndex = parsed.searchParams.get("index") || "";
+        return {
+          statusCode: 200,
+          body: { success: true },
+        };
+      },
+    }),
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "openai-main.json",
+      authIndex: 0,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(requestIndex, "0");
+  assert.equal(result.success, true);
+});
+
+test("removeManagedAuthFile treats 204 no-content as successful removal", async () => {
+  const api = sync.createSyncApi({
+    http: {
+      request: (_url, _options, callback) => {
+        const req = new EventEmitter();
+        req.setTimeout = () => {};
+        req.destroy = (err) => {
+          if (err) {
+            process.nextTick(() => req.emit("error", err));
+          }
+        };
+        req.end = () => {
+          process.nextTick(() => {
+            const res = new EventEmitter();
+            res.statusCode = 204;
+            callback(res);
+            res.emit("end");
+          });
+        };
+        return req;
+      },
+    },
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "openai-main.json",
+      authIndex: 0,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.removed, true);
+});
+
+test("syncDroidSettings treats empty /v1/models body as detect failure, not selection clear", async () => {
+  let modelRequestCount = 0;
+  const api = sync.createSyncApi({
+    config: {
+      DEFAULT_PORT: 8317,
+      configExists: () => true,
+      ensureDir: () => {},
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+        apiKey: "k",
+        managementKey: "",
+      }),
+      readState: () => ({ apiKey: "k", managementKey: "" }),
+      updateState: () => {
+        throw new Error("updateState should not run on detect_failed");
+      },
+    },
+    http: {
+      request: (url, _options, callback) => {
+        const req = new EventEmitter();
+        req.setTimeout = () => {};
+        req.destroy = (err) => {
+          if (err) {
+            process.nextTick(() => req.emit("error", err));
+          }
+        };
+        req.end = () => {
+          process.nextTick(() => {
+            const pathname = new URL(url).pathname;
+            const res = new EventEmitter();
+            res.resume = () => {};
+            if (pathname === "/v1/models") {
+              modelRequestCount += 1;
+              res.statusCode = 200;
+              callback(res);
+              res.emit("data", "");
+              res.emit("end");
+              return;
+            }
+            res.statusCode = 404;
+            callback(res);
+            res.emit("data", "{\"error\":\"not found\"}");
+            res.emit("end");
+          });
+        };
+        return req;
+      },
+    },
+    output: {
+      printGuidedError: () => {},
+      printSuccess: () => {},
+      printWarning: () => {},
+    },
+  });
+
+  const result = await api.syncDroidSettings({
+    quiet: true,
+    selectedModels: ["gpt-5"],
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "detect_failed");
+  assert.equal(result.result && result.result.reason, "detect_failed");
+  assert.equal(modelRequestCount >= 2, true);
+});
+
+test("removeManagedAuthFile blocks runtime-only entries", async () => {
+  let requestCalls = 0;
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": () => {
+        requestCalls += 1;
+        return {
+          statusCode: 200,
+          body: { success: true },
+        };
+      },
+    }),
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "runtime.json",
+      runtimeOnly: true,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(requestCalls, 0);
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "runtime_only");
 });
 
 test("fetchProviderConnectionStatusSafe returns unknown when management key is unavailable", async () => {

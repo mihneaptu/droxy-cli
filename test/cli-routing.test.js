@@ -5,11 +5,28 @@ const test = require("node:test");
 
 const { runCli } = require("../droxy.js");
 
-function createDeps() {
+function createDeps(options = {}) {
   const calls = [];
-  const state = {
-    selectedModels: ["gpt-5"],
-  };
+  const state = Object.prototype.hasOwnProperty.call(options, "state")
+    ? options.state
+    : {
+      selectedModels: ["gpt-5"],
+    };
+  const startResult = Object.prototype.hasOwnProperty.call(options, "startResult")
+    ? options.startResult
+    : { running: true, started: true, attached: true };
+  const stopResult = Object.prototype.hasOwnProperty.call(options, "stopResult")
+    ? options.stopResult
+    : { stopped: true };
+  const statusResult = Object.prototype.hasOwnProperty.call(options, "statusResult")
+    ? options.statusResult
+    : { running: true };
+  const loginResult = Object.prototype.hasOwnProperty.call(options, "loginResult")
+    ? options.loginResult
+    : { success: true };
+  const syncResult = Object.prototype.hasOwnProperty.call(options, "syncResult")
+    ? options.syncResult
+    : { success: true };
   return {
     calls,
     deps: {
@@ -26,18 +43,34 @@ function createDeps() {
       output: {
         log: (msg) => calls.push(["log", String(msg)]),
         printInfo: (msg) => calls.push(["printInfo", String(msg)]),
+        printWarning: (msg) => calls.push(["printWarning", String(msg)]),
         printGuidedError: (payload) => calls.push(["printGuidedError", payload]),
       },
       proxy: {
-        startProxy: async (opts) => calls.push(["startProxy", opts]),
-        stopProxy: async (opts) => calls.push(["stopProxy", opts]),
-        statusProxy: async (opts) => calls.push(["statusProxy", opts]),
+        startProxy: async (opts) => {
+          calls.push(["startProxy", opts]);
+          return startResult;
+        },
+        stopProxy: async (opts) => {
+          calls.push(["stopProxy", opts]);
+          return stopResult;
+        },
+        statusProxy: async (opts) => {
+          calls.push(["statusProxy", opts]);
+          return statusResult;
+        },
       },
       login: {
-        loginFlow: async (opts) => calls.push(["loginFlow", opts]),
+        loginFlow: async (opts) => {
+          calls.push(["loginFlow", opts]);
+          return loginResult;
+        },
       },
       sync: {
-        syncDroidSettings: async (opts) => calls.push(["syncDroidSettings", opts]),
+        syncDroidSettings: async (opts) => {
+          calls.push(["syncDroidSettings", opts]);
+          return syncResult;
+        },
       },
       interactive: {
         runInteractiveHome: async () => calls.push(["runInteractiveHome"]),
@@ -49,8 +82,17 @@ function createDeps() {
 
 test("routes start/stop/status commands", async () => {
   const first = createDeps();
-  await runCli(["start", "--quiet"], first.deps);
-  assert.deepEqual(first.calls, [["startProxy", { quiet: true, allowAttach: true }]]);
+  const startResult = await runCli(["start", "--quiet"], first.deps);
+  assert.deepEqual(first.calls, [
+    ["startProxy", { quiet: true, allowAttach: true }],
+    ["syncDroidSettings", { quiet: true, selectedModels: ["gpt-5"] }],
+  ]);
+  assert.deepEqual(startResult, {
+    running: true,
+    started: true,
+    attached: true,
+    syncResult: { success: true },
+  });
 
   const second = createDeps();
   await runCli(["stop", "--force", "--quiet"], second.deps);
@@ -62,6 +104,47 @@ test("routes start/stop/status commands", async () => {
     "statusProxy",
     { check: true, json: true, verbose: true, quiet: true },
   ]]);
+});
+
+test("start skips sync when no saved selection and does not sync on failed start", async () => {
+  const noSelection = createDeps({ state: {} });
+  const noSelectionResult = await runCli(["start"], noSelection.deps);
+  assert.deepEqual(noSelection.calls, [
+    ["startProxy", { quiet: false, allowAttach: true }],
+    ["printInfo", "No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models."],
+  ]);
+  assert.deepEqual(noSelectionResult, { running: true, started: true, attached: true });
+
+  const failedStart = createDeps({ startResult: { running: false, reason: "binary_missing" } });
+  const failedStartResult = await runCli(["start"], failedStart.deps);
+  assert.deepEqual(failedStart.calls, [["startProxy", { quiet: false, allowAttach: true }]]);
+  assert.deepEqual(failedStartResult, { running: false, reason: "binary_missing" });
+});
+
+test("start keeps proxy success when auto-sync throws", async () => {
+  const target = createDeps();
+  target.deps.sync.syncDroidSettings = async (opts) => {
+    target.calls.push(["syncDroidSettings", opts]);
+    throw new Error("disk write failed");
+  };
+
+  const result = await runCli(["start"], target.deps);
+  assert.deepEqual(target.calls, [
+    ["startProxy", { quiet: false, allowAttach: true }],
+    ["printInfo", "Auto-syncing selected models to Droid..."],
+    ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
+    ["printWarning", "Proxy started, but model auto-sync failed: disk write failed"],
+  ]);
+  assert.deepEqual(result, {
+    running: true,
+    started: true,
+    attached: true,
+    syncResult: {
+      success: false,
+      reason: "auto_sync_failed",
+      message: "disk write failed",
+    },
+  });
 });
 
 test("routes login/connect with automatic model sync defaults", async () => {
@@ -87,8 +170,7 @@ test("routes login/connect with automatic model sync defaults", async () => {
     ["syncDroidSettings", { quiet: false, selectedModels: ["gpt-5"] }],
   ]);
 
-  const noSelection = createDeps();
-  noSelection.deps.config.readState = () => ({});
+  const noSelection = createDeps({ state: {} });
   await runCli(["login", "claude"], noSelection.deps);
   assert.deepEqual(noSelection.calls, [
     [

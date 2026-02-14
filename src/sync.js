@@ -1018,6 +1018,9 @@ function createSyncApi(overrides = {}) {
     protocol,
     suffix,
     managementKey,
+    method = "GET",
+    body,
+    allowEmptySuccessBody = false,
   }) {
     if (!managementKey) return null;
     const url = buildProxyUrl({
@@ -1029,7 +1032,12 @@ function createSyncApi(overrides = {}) {
     const headersList = buildManagementHeaderVariants(managementKey);
     for (const headers of headersList) {
       try {
-        return await requestJson(url, { Accept: "application/json", ...headers });
+        return await requestJsonWithOptions(url, {
+          method,
+          body,
+          allowEmptySuccessBody,
+          headers: { Accept: "application/json", ...headers },
+        });
       } catch (err) {
         if (!isAuthError(err)) {
           throw err;
@@ -1155,19 +1163,95 @@ function createSyncApi(overrides = {}) {
     return "unknown";
   }
 
+  function normalizeAuthFileName(file) {
+    if (!file || typeof file !== "object") return "";
+    const directName = String(file.name || file.file || file.filename || file.id || "").trim();
+    if (directName) return directName;
+    const filePath = String(file.path || "").trim();
+    if (!filePath) return "";
+    const baseName = String(pathApi.basename(filePath)).trim();
+    return baseName;
+  }
+
+  function parseIntegerOrNull(value) {
+    const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 0) return null;
+    return parsed;
+  }
+
+  function parseOptionalFlag(value) {
+    const parsed = parseConnectionBoolean(value);
+    if (parsed !== null) return parsed;
+    if (typeof value !== "string") return false;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "yes" || normalized === "on" || normalized === "enabled") return true;
+    return false;
+  }
+
+  function parseManagedAuthFiles(payload) {
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.files)) return [];
+    const rows = [];
+    for (const file of payload.files) {
+      if (!file || typeof file !== "object") continue;
+      const providerRaw = String(
+        file.provider || file.type || file.provider_id || file.providerId || ""
+      ).trim();
+      const providerId = normalizeProviderIdStrict(providerRaw);
+      const name = normalizeAuthFileName(file);
+      const path = String(file.path || "").trim();
+      const authIndex = parseIntegerOrNull(file.auth_index ?? file.authIndex ?? file.index);
+      const connectionState = parseAuthFileConnectionState(file);
+      const statusMessage = String(
+        file.status_message || file.statusMessage || file.detail || ""
+      ).trim();
+      const account = String(file.account || "").trim();
+      const email = String(file.email || "").trim();
+      const accountType = String(file.account_type || file.accountType || "").trim();
+      const label = String(file.label || file.name || account || email || name || path || "").trim();
+      const runtimeOnly = parseOptionalFlag(file.runtime_only || file.runtimeOnly);
+      const disabled = parseOptionalFlag(file.disabled);
+      const unavailable = parseOptionalFlag(file.unavailable);
+
+      rows.push({
+        providerId,
+        providerRaw,
+        name,
+        path,
+        authIndex,
+        account,
+        email,
+        accountType,
+        label,
+        status: String(file.status || file.state || "").trim(),
+        statusMessage,
+        connectionState,
+        connected: connectionState === "connected",
+        verified: connectionState !== "unknown",
+        runtimeOnly,
+        disabled,
+        unavailable,
+        removable: Boolean(name) && !runtimeOnly,
+      });
+    }
+    return rows;
+  }
+
   function parseAuthFilesProviderConnections(payload) {
     if (!payload || typeof payload !== "object" || !Array.isArray(payload.files)) {
       return { providersState: "unknown", providersConnected: 0, byProvider: {} };
     }
 
+    const rows = parseManagedAuthFiles(payload);
     const byProvider = {};
     const scoreByProvider = {};
-    for (const file of payload.files) {
-      if (!file || typeof file !== "object") continue;
-      const providerId = normalizeProviderIdStrict(file.provider || file.type || file.provider_id || file.providerId);
+    const connectedCountByProvider = {};
+    for (const row of rows) {
+      const providerId = row.providerId;
       if (!providerId) continue;
-      const state = parseAuthFileConnectionState(file);
+      const state = row.connectionState;
       if (!scoreByProvider[providerId]) scoreByProvider[providerId] = 0;
+      if (!connectedCountByProvider[providerId]) connectedCountByProvider[providerId] = 0;
+      if (state === "connected") connectedCountByProvider[providerId] += 1;
       const nextScore = state === "connected" ? 2 : state === "disconnected" ? 1 : 0;
       if (nextScore < scoreByProvider[providerId]) continue;
       scoreByProvider[providerId] = nextScore;
@@ -1176,6 +1260,12 @@ function createSyncApi(overrides = {}) {
         connectionState: state,
         verified: state !== "unknown",
       };
+    }
+
+    for (const [providerId, value] of Object.entries(byProvider)) {
+      const connectionCount = Number(connectedCountByProvider[providerId]) || 0;
+      value.connectionCount = connectionCount;
+      if (value.connected && value.connectionCount < 1) value.connectionCount = 1;
     }
 
     const providersConnected = Object.values(byProvider).filter((provider) => provider.connected).length;
@@ -1236,6 +1326,115 @@ function createSyncApi(overrides = {}) {
       return await fetchProviderConnectionStatus(configValues, options);
     } catch {
       return { providersState: "unknown", providersConnected: 0, byProvider: {} };
+    }
+  }
+
+  async function fetchManagedAuthFiles(configValues, options = {}) {
+    let state = {};
+    if (
+      Object.prototype.hasOwnProperty.call(options, "state") &&
+      options.state &&
+      typeof options.state === "object"
+    ) {
+      state = options.state;
+    } else if (config && typeof config.readState === "function") {
+      state = config.readState() || {};
+    }
+
+    const managementKey = resolveManagementKey(configValues, state, options);
+    if (!managementKey) return [];
+
+    const protocol =
+      (options && typeof options.protocol === "string" && options.protocol) ||
+      configuredProtocol(configValues);
+    const payload = await requestManagementJson({
+      configValues,
+      protocol,
+      suffix: MANAGEMENT_AUTH_FILES_PATH,
+      managementKey,
+    });
+    if (!payload) return [];
+    return parseManagedAuthFiles(payload);
+  }
+
+  async function fetchManagedAuthFilesSafe(configValues, options = {}) {
+    try {
+      return await fetchManagedAuthFiles(configValues, options);
+    } catch {
+      return [];
+    }
+  }
+
+  async function removeManagedAuthFile(configValues, fileRef = {}, options = {}) {
+    let state = {};
+    if (
+      Object.prototype.hasOwnProperty.call(options, "state") &&
+      options.state &&
+      typeof options.state === "object"
+    ) {
+      state = options.state;
+    } else if (config && typeof config.readState === "function") {
+      state = config.readState() || {};
+    }
+
+    const managementKey = resolveManagementKey(configValues, state, options);
+    if (!managementKey) {
+      return { success: false, reason: "management_key_missing", message: "Management key is missing." };
+    }
+
+    const runtimeOnly = parseOptionalFlag(fileRef.runtimeOnly || fileRef.runtime_only);
+    if (runtimeOnly) {
+      return { success: false, reason: "runtime_only", message: "Runtime-only auth entries cannot be removed." };
+    }
+
+    let name = String(fileRef.name || "").trim();
+    if (!name) {
+      const filePath = String(fileRef.path || "").trim();
+      name = filePath ? String(pathApi.basename(filePath)).trim() : "";
+    }
+    if (!name) {
+      return {
+        success: false,
+        reason: "name_missing",
+        message: "Auth file name is required to remove an account.",
+      };
+    }
+
+    const index = parseIntegerOrNull(fileRef.authIndex ?? fileRef.auth_index ?? fileRef.index);
+    const params = new URLSearchParams();
+    params.set("name", name);
+    if (index !== null) params.set("index", String(index));
+
+    const protocol =
+      (options && typeof options.protocol === "string" && options.protocol) ||
+      configuredProtocol(configValues);
+    try {
+      const payload = await requestManagementJson({
+        configValues,
+        protocol,
+        suffix: `${MANAGEMENT_AUTH_FILES_PATH}?${params.toString()}`,
+        managementKey,
+        method: "DELETE",
+        allowEmptySuccessBody: true,
+      });
+      if (!payload) {
+        return { success: false, reason: "auth_failed", message: "Management authorization failed." };
+      }
+      return { success: true, removed: true, name, index, payload };
+    } catch (err) {
+      const details =
+        helpers && typeof helpers.formatErrorSummary === "function"
+          ? helpers.formatErrorSummary(err)
+          : String((err && (err.message || err)) || "").trim();
+      return { success: false, reason: "request_failed", message: details || "Could not remove account." };
+    }
+  }
+
+  async function removeManagedAuthFileSafe(configValues, fileRef = {}, options = {}) {
+    try {
+      return await removeManagedAuthFile(configValues, fileRef, options);
+    } catch {
+      return { success: false, reason: "request_failed", message: "Could not remove account." };
     }
   }
 
@@ -1310,10 +1509,27 @@ function createSyncApi(overrides = {}) {
     }
   }
 
-  function requestJson(url, headers) {
+  function requestJsonWithOptions(url, requestOptions = {}) {
     const client = url.startsWith("https") ? httpsApi : httpApi;
+    const method = String(requestOptions.method || "GET").trim().toUpperCase() || "GET";
+    const headers =
+      requestOptions.headers && typeof requestOptions.headers === "object"
+        ? { ...requestOptions.headers }
+        : {};
+    let bodyText = "";
+    if (requestOptions.body !== undefined && requestOptions.body !== null) {
+      bodyText =
+        typeof requestOptions.body === "string"
+          ? requestOptions.body
+          : JSON.stringify(requestOptions.body);
+      if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) {
+        headers["Content-Type"] = "application/json";
+      }
+      headers["Content-Length"] = Buffer.byteLength(bodyText);
+    }
+
     return new Promise((resolve, reject) => {
-      const req = client.request(url, { method: "GET", headers }, (res) => {
+      const req = client.request(url, { method, headers }, (res) => {
         let body = "";
         res.on("data", (chunk) => {
           body += chunk;
@@ -1323,8 +1539,17 @@ function createSyncApi(overrides = {}) {
             reject(new Error(`HTTP ${res.statusCode}: ${body}`));
             return;
           }
+          const trimmed = body.trim();
+          if (!trimmed) {
+            if (requestOptions.allowEmptySuccessBody === true) {
+              resolve({});
+              return;
+            }
+            reject(new Error("Empty response body"));
+            return;
+          }
           try {
-            resolve(JSON.parse(body));
+            resolve(JSON.parse(trimmed));
           } catch {
             reject(new Error("Invalid JSON response"));
           }
@@ -1334,7 +1559,17 @@ function createSyncApi(overrides = {}) {
         req.destroy(new Error("Request timed out"));
       });
       req.on("error", reject);
+      if (bodyText) {
+        req.write(bodyText);
+      }
       req.end();
+    });
+  }
+
+  function requestJson(url, headers) {
+    return requestJsonWithOptions(url, {
+      method: "GET",
+      headers,
     });
   }
 
@@ -1876,6 +2111,8 @@ function createSyncApi(overrides = {}) {
     describeSyncResult,
     fetchAvailableModelEntries,
     fetchAvailableModelEntriesSafe,
+    fetchManagedAuthFiles,
+    fetchManagedAuthFilesSafe,
     fetchManagementModelExclusions,
     fetchProviderConnectionStatus,
     fetchProviderConnectionStatusSafe,
@@ -1886,9 +2123,12 @@ function createSyncApi(overrides = {}) {
     isDroxyManagedEntry,
     isModelEligible,
     parseAuthFilesModelExclusions,
+    parseManagedAuthFiles,
     parseAuthFilesProviderConnections,
     parseUnsupportedModelIdsFromStatusMessage,
     normalizeSelectedModelIds,
+    removeManagedAuthFile,
+    removeManagedAuthFileSafe,
     resolveReachableProtocol,
     splitModelsForFactoryEntries,
     syncDroidSettings,
