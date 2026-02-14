@@ -294,6 +294,12 @@ function createProxyApi(overrides = {}) {
 
     const values = config.readConfigValues();
     const status = await getProxyStatus(values.host, values.port);
+
+    if (check) {
+      if (!status.running) process.exitCode = 1;
+      return { running: status.running, blocked: status.blocked };
+    }
+
     const state = config.readState() || {};
     const providerStatus =
       sync && typeof sync.fetchProviderConnectionStatusSafe === "function"
@@ -306,11 +312,6 @@ function createProxyApi(overrides = {}) {
         : 0;
     const providersState =
       providerStatus && providerStatus.providersState === "verified" ? "verified" : "unknown";
-
-    if (check) {
-      if (!status.running) process.exitCode = 1;
-      return { running: status.running, blocked: status.blocked };
-    }
 
     let uptime = null;
     if (status.running && state.startedAt) {

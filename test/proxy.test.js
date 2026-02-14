@@ -49,6 +49,54 @@ test("statusProxy check mode sets exitCode when proxy is not running", async () 
   }
 });
 
+test("statusProxy check mode skips provider verification probe", async () => {
+  const previousExitCode = process.exitCode;
+  let providerProbeCalls = 0;
+  const api = proxy.createProxyApi({
+    config: {
+      configExists: () => true,
+      getConfigPath: () => "C:/tmp/config.yaml",
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 65530,
+        tlsEnabled: false,
+        authDir: "~/.cli-proxy-api",
+      }),
+      readState: () => ({}),
+      resolveAuthDir: (value) => value,
+    },
+    helpers: {
+      checkPort: async () => false,
+      isWindows: () => false,
+      formatErrorSummary: (value) => String(value || ""),
+    },
+    output: {
+      log: () => {},
+      printWarning: () => {},
+    },
+    sync: {
+      fetchProviderConnectionStatusSafe: async () => {
+        providerProbeCalls += 1;
+        return {
+          providersState: "verified",
+          providersConnected: 1,
+          byProvider: {},
+        };
+      },
+    },
+  });
+
+  try {
+    process.exitCode = 0;
+    const result = await api.statusProxy({ check: true, quiet: true });
+    assert.equal(result.running, false);
+    assert.equal(process.exitCode, 1);
+    assert.equal(providerProbeCalls, 0);
+  } finally {
+    process.exitCode = previousExitCode;
+  }
+});
+
 test("statusProxy reports running when configured port is open", async () => {
   const cleanup = withTempAppDir();
   const server = net.createServer();

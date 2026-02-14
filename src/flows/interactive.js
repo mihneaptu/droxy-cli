@@ -361,9 +361,7 @@ function createInteractiveApi(overrides = {}) {
       if (!modelId) continue;
 
       const initialMode =
-        effectiveThinkingModelModes[modelId] ||
-        resolveThinkingModeFromHistory(thinkingModelModeHistory, modelId) ||
-        "medium";
+        effectiveThinkingModelModes[modelId] || "none";
       const nextModeMap = await promptThinkingModelModes(
         menu,
         [modelId],

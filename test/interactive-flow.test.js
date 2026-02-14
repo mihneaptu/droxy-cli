@@ -324,6 +324,95 @@ test("manage thinking modes updates active mode and history for existing models"
   assert.equal(syncCalls.length, 1);
 });
 
+test("manage thinking modes keeps thinking off when mode selection is cancelled", async () => {
+  const selectSingleCalls = [];
+  const syncCalls = [];
+  let state = {
+    apiKey: "k",
+    selectedModels: ["gpt-5"],
+    thinkingModels: [],
+    thinkingModelModes: {},
+    thinkingModelModeHistory: { "gpt-5": ["high", "medium"] },
+  };
+  const singleSelections = [{ index: 2 }, { index: 0 }, { index: 0 }, { index: 0 }, { index: 1 }];
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => state,
+      updateState: (partial) => {
+        state = { ...state, ...partial };
+        return state;
+      },
+      configExists: () => true,
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "codex", label: "OpenAI / Codex" }],
+      getProvidersWithConnectionStatus: () => [
+        { id: "codex", label: "OpenAI / Codex", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async (payload) => {
+        if (/Choose models/i.test(payload.title)) {
+          return { cancelled: false, selected: getSelectableValues(payload.items) };
+        }
+        return { cancelled: true, selected: [] };
+      },
+      selectSingle: async (payload) => {
+        selectSingleCalls.push(payload);
+        if (/Thinking mode\s+•\s+gpt-5/i.test(String(payload.title || ""))) {
+          return { cancelled: true, index: -1, value: "" };
+        }
+        const next = singleSelections.shift() || { index: payload.items.length - 1 };
+        return { cancelled: false, value: "", ...next };
+      },
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [{ id: "gpt-5", provider: "openai" }],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async (opts) => {
+        syncCalls.push(opts);
+        return { success: true, result: { status: "synced", modelsAdded: opts.selectedModels.length } };
+      },
+    },
+  });
+
+  await interactive.runInteractiveHome();
+
+  const thinkingModeMenuCall = selectSingleCalls.find((payload) =>
+    /Thinking mode\s+•\s+gpt-5/i.test(String(payload.title || ""))
+  );
+  assert.ok(thinkingModeMenuCall);
+  assert.equal(
+    thinkingModeMenuCall.initialIndex,
+    Array.isArray(thinkingModeMenuCall.items) ? thinkingModeMenuCall.items.indexOf("None") : -1
+  );
+  assert.deepEqual(state.thinkingModels, []);
+  assert.deepEqual(state.thinkingModelModes, {});
+  assert.deepEqual(state.thinkingModelModeHistory, { "gpt-5": ["high", "medium"] });
+  assert.equal(syncCalls.length, 1);
+});
+
 test("interactive home auto-syncs when selected models drift from Droid state", async () => {
   const syncCalls = [];
   const interactive = createInteractiveApi({
