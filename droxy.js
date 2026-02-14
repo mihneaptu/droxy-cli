@@ -254,6 +254,36 @@ function isInteractiveSession(options = {}) {
   return Boolean(process.stdin && process.stdin.isTTY && process.stdout && process.stdout.isTTY);
 }
 
+async function syncPersistedModelSelection({ quiet, config, helpers, sync, output }) {
+  const state =
+    config && typeof config.readState === "function" ? config.readState() || {} : {};
+  const hasPersistedSelection = Array.isArray(state.selectedModels);
+  if (!hasPersistedSelection) {
+    if (!quiet && output && typeof output.printInfo === "function") {
+      output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models.");
+    }
+    return {
+      skipped: true,
+      reason: "no_saved_selection",
+      syncResult: null,
+    };
+  }
+
+  const selectedModels =
+    helpers && typeof helpers.normalizeIdList === "function"
+      ? helpers.normalizeIdList(state.selectedModels)
+      : [];
+  if (!quiet && output && typeof output.printInfo === "function") {
+    output.printInfo("Auto-syncing selected models to Droid...");
+  }
+  const syncResult = await sync.syncDroidSettings({ quiet, selectedModels });
+  return {
+    skipped: false,
+    reason: "",
+    syncResult,
+  };
+}
+
 async function runCli(argv = process.argv.slice(2), options = {}) {
   const config = options.config || configModule;
   const interactive = options.interactive || interactiveModule;
@@ -286,7 +316,23 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
   }
 
   if (parsed.command === "start") {
-    return proxy.startProxy({ quiet: parsed.hasFlag("--quiet"), allowAttach: true });
+    const quiet = parsed.hasFlag("--quiet");
+    const startResult = await proxy.startProxy({ quiet, allowAttach: true });
+    const running = Boolean(startResult && startResult.running);
+    if (!running) {
+      return startResult;
+    }
+    const { skipped, syncResult } = await syncPersistedModelSelection({
+      quiet,
+      config,
+      helpers,
+      sync,
+      output,
+    });
+    if (!startResult || typeof startResult !== "object" || Array.isArray(startResult) || skipped) {
+      return startResult;
+    }
+    return { ...startResult, syncResult };
   }
 
   if (parsed.command === "stop") {
@@ -320,23 +366,16 @@ async function runCli(argv = process.argv.slice(2), options = {}) {
     if (skipModels) {
       return loginResult;
     }
-    const state =
-      config && typeof config.readState === "function" ? config.readState() || {} : {};
-    const hasPersistedSelection = Array.isArray(state.selectedModels);
-    if (!hasPersistedSelection) {
-      if (!quiet && output && typeof output.printInfo === "function") {
-        output.printInfo("No saved model selection yet. Skipping auto-sync. Use `droxy` to choose models.");
-      }
+    const { skipped, syncResult } = await syncPersistedModelSelection({
+      quiet,
+      config,
+      helpers,
+      sync,
+      output,
+    });
+    if (skipped) {
       return loginResult;
     }
-    const selectedModels =
-      helpers && typeof helpers.normalizeIdList === "function"
-        ? helpers.normalizeIdList(state.selectedModels)
-        : [];
-    if (!quiet && output && typeof output.printInfo === "function") {
-      output.printInfo("Auto-syncing selected models to Droid...");
-    }
-    const syncResult = await sync.syncDroidSettings({ quiet, selectedModels });
     if (loginResult && typeof loginResult === "object") {
       return { ...loginResult, syncResult };
     }
