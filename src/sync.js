@@ -505,7 +505,22 @@ function createSyncApi(overrides = {}) {
     const supportStateFromStatus = parseThinkingSupportState(statusHint);
     const supportState =
       supportStateDirect !== null ? supportStateDirect : supportStateFromStatus;
-    const hasExplicitModesHint = modesHint !== undefined;
+    const modesFromSupportHint =
+      modesHint === undefined &&
+      supportHint &&
+      typeof supportHint === "object"
+        ? normalizeAllowedThinkingModes(supportHint, {
+            includeAuto: false,
+            includeNone: false,
+          })
+        : [];
+    const effectiveModesHint =
+      modesHint !== undefined
+        ? modesHint
+        : modesFromSupportHint.length
+          ? supportHint
+          : undefined;
+    const hasExplicitModesHint = effectiveModesHint !== undefined;
 
     if (supportState === false) {
       return normalizeThinkingCapability({
@@ -518,7 +533,7 @@ function createSyncApi(overrides = {}) {
       return normalizeThinkingCapability({
         verified: true,
         supported: true,
-        allowedModes: modesHint,
+        allowedModes: effectiveModesHint,
       });
     }
 

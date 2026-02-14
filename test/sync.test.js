@@ -445,6 +445,67 @@ test("fetchAvailableModelEntries parses thinking mode maps with allow semantics"
   });
 });
 
+test("fetchAvailableModelEntries preserves thinking modes nested under capabilities.thinking", async () => {
+  const api = sync.createSyncApi({
+    http: createRequestMock({
+      data: [
+        {
+          id: "gpt-5",
+          provider: "openai",
+          capabilities: {
+            thinking: {
+              supported: true,
+              allowed_modes: ["low"],
+            },
+          },
+        },
+      ],
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    { protocolResolution: { reachable: true, protocol: "http" }, state: {} }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries preserves direct mode maps under thinking support objects", async () => {
+  const api = sync.createSyncApi({
+    http: createRequestMock({
+      data: [
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: {
+            supported: true,
+            medium: true,
+            high: false,
+          },
+        },
+      ],
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    { protocolResolution: { reachable: true, protocol: "http" }, state: {} }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "medium", "none"],
+  });
+});
+
 test("fetchAvailableModelEntries filters models with restricted status hints", async () => {
   const api = sync.createSyncApi({
     http: createRequestMock({
