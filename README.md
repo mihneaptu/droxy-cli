@@ -1,13 +1,92 @@
 # Droxy CLI
 
-Minimal Droxy CLI MVP focused on proxy lifecycle, login, and Droid sync.
+Connect browser-authenticated AI subscriptions to Droid through a local OpenAI-compatible proxy.
+
+Droxy CLI is an MVP focused on one job: get your providers connected, keep a local proxy running, and sync selected models into Droid with minimal friction.
+
+## What You Can Do Today
+
+- Connect supported providers through browser-based login.
+- Start, stop, and inspect a local proxy endpoint.
+- Auto-sync selected models into Droid settings.
+- Use machine-readable status output for scripts and automation.
+- Use interactive mode (`droxy`) for guided setup and management.
 
 ## Requirements
 
-- Node.js 18+
-- `cli-proxy-api-plus` binary available in `vendor/` or via `DROXY_PROXY_BIN`
+- Node.js `>=18`
+- A `cli-proxy-api-plus` binary available in one of these locations:
+  - `DROXY_PROXY_BIN` (explicit override)
+  - Droxy app vendor directory (`DROXY_APP_DIR/vendor` or default app dir)
+  - Repository `vendor/` directory (local development)
 
-## Usage
+## Install
+
+### Option A: Install from GitHub release scripts
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/mihneaptu/droxy-cli/main/install.ps1 | iex
+```
+
+macOS/Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mihneaptu/droxy-cli/main/install.sh | sh
+```
+
+### Option B: Install from source (developer-friendly)
+
+```bash
+git clone https://github.com/mihneaptu/droxy-cli.git
+cd droxy-cli
+npm install
+npm link
+```
+
+Verify:
+
+```bash
+droxy --help
+```
+
+### Option C: Run locally without global install
+
+```bash
+npm install
+node droxy.js --help
+```
+
+## 5-Minute Quickstart
+
+1. Open interactive setup:
+
+```bash
+droxy
+```
+
+2. Or connect directly via command:
+
+```bash
+droxy login claude
+```
+
+3. Start the proxy:
+
+```bash
+droxy start
+```
+
+4. Check machine-readable status:
+
+```bash
+droxy status --json
+```
+
+`droxy connect` is a compatibility alias for `droxy login`.
+
+## Command Reference
 
 ```bash
 droxy
@@ -20,55 +99,91 @@ droxy help
 droxy version
 ```
 
-`droxy` (no args) opens interactive manual setup mode.
-`droxy ui` was removed; use `droxy`.
+Notes:
 
-## Command guide
+- `droxy` with no args opens interactive home in TTY.
+- `droxy ui` was removed. Use `droxy`.
+- `--with-models` is kept as a legacy alias; model auto-sync is already the default.
+- `--skip-models` performs login only and skips auto-sync.
 
-- `droxy`: interactive setup (recommended for first run)
-- `droxy login`: primary non-interactive login flow
-- `droxy connect`: compatibility alias for `droxy login`
+## Supported Providers
 
-Interactive flow:
-
-1. Open Accounts
-   - Shows connected/not connected status for each provider
-   - Supports listing account status and connecting a provider
-2. Choose provider, then choose models
-   - Model picker shows connected providers only and selected counts per provider
-   - Includes a separate thinking-models menu for selected models
-   - Auto-syncs selected models to Droid (including clearing stale Droid models when selection is empty)
-3. Droxy continuously self-checks selected-model drift and auto-syncs Droid whenever proxy is running
-
-Providers:
-
-- `gemini`
-- `codex`
-- `claude`
+- `gemini` (Google AI)
+- `codex` (OpenAI / Codex)
+- `claude` (Anthropic)
 - `qwen`
-- `kimi`
+- `kimi` (Moonshot)
 - `iflow`
 - `antigravity`
 
-## Solo Dev Notes
+## Status Output for Automation
 
-- CLI style + voice system: `docs/DROXY_STYLE_GUIDE.md`
-- Git workflow (local + GitHub): `docs/GIT_WORKFLOW.md`
-- Style baseline: one Anthropic-inspired voice with Droid orange primary accent
+Use:
 
-## Contributing Workflow
+```bash
+droxy status --json
+```
 
-Use a small-PR workflow:
+Typical fields:
 
-1. Start from updated `main`.
-2. Create one focused branch (`feature/*`, `fix/*`, `chore/*`).
-3. Open a PR with validation notes and merge using squash.
+- `status` (`running`, `stopped`, `blocked`, `config_missing`)
+- `host`
+- `port`
+- `config`
+- `pid`
+- `uptime`
+- `providers` (connected provider count)
 
-See `docs/GIT_WORKFLOW.md` for branch naming, commit conventions, cleanup commands, and recommended GitHub repository settings.
+## Environment Variables
 
-For contributor onboarding and project policies:
+- `DROXY_PROXY_BIN`: override proxy binary path.
+- `DROXY_APP_DIR`: override Droxy app/config/state directory.
+- `DROXY_FACTORY_DIR`: override Droid/Factory settings directory.
+- `DROXY_LOGIN_NO_BROWSER=1`: disable browser auto-open in login flow.
+- `NO_COLOR=1` or `DROXY_NO_COLOR=1`: disable colored output.
 
-- `CONTRIBUTING.md`
-- `CODE_OF_CONDUCT.md`
-- `SECURITY.md`
-- `SUPPORT.md`
+Installer-specific overrides:
+
+- `DROXY_GITHUB_REPO`: alternate GitHub repo for install scripts.
+- `DROXY_VERSION`: specific version/tag for install scripts.
+
+## Troubleshooting
+
+Config missing:
+
+```bash
+droxy login
+```
+
+Port in use:
+
+```bash
+droxy status --verbose
+droxy stop --force
+```
+
+Only use `--force` when you own the process on that port.
+
+Binary missing:
+
+- Place `cli-proxy-api-plus` in `vendor/`, or
+- set `DROXY_PROXY_BIN` to the executable path.
+
+## Project Docs
+
+- Style system: `docs/DROXY_STYLE_GUIDE.md`
+- Git workflow: `docs/GIT_WORKFLOW.md`
+- Contributing: `CONTRIBUTING.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
+- Security policy: `SECURITY.md`
+- Support guide: `SUPPORT.md`
+- Contributor operating rules: `AGENTS.md`
+
+## Support and Security
+
+- Issues and support: https://github.com/mihneaptu/droxy-cli/issues
+- Private security reports: https://github.com/mihneaptu/droxy-cli/security/advisories/new
+
+## License
+
+MIT
