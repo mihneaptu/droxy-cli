@@ -509,7 +509,7 @@ test("provider model picker preselects Droid-synced models when no prior selecti
   assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5"]);
 });
 
-test("provider model picker prefers persisted provider defaults over Droid-derived defaults", async () => {
+test("provider model picker prefers Droid-derived defaults over persisted provider cache", async () => {
   const selectMultipleCalls = [];
   let state = {
     factory: {
@@ -578,7 +578,7 @@ test("provider model picker prefers persisted provider defaults over Droid-deriv
   await interactive.runInteractiveHome();
 
   assert.equal(selectMultipleCalls.length, 2);
-  assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5.1"]);
+  assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5"]);
 });
 
 test("provider model picker prefers Droid-synced defaults over stale local selection", async () => {
@@ -706,7 +706,7 @@ test("choose models prunes stale saved selections to current /v1/models before p
       selectMultiple: async (payload) => {
         selectMultipleCalls.push(payload);
         if (/Choose models/i.test(payload.title)) {
-          return { cancelled: false, selected: payload.initialSelected.slice() };
+          return { cancelled: false, selected: ["gpt-5"] };
         }
         return { cancelled: true, selected: [] };
       },
@@ -739,7 +739,7 @@ test("choose models prunes stale saved selections to current /v1/models before p
   await interactive.runInteractiveHome();
 
   assert.equal(selectMultipleCalls.length, 1);
-  assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5"]);
+  assert.deepEqual(selectMultipleCalls[0].initialSelected, []);
   assert.deepEqual(state.selectedModels, ["gpt-5"]);
   assert.deepEqual(state.thinkingModels, ["gpt-5"]);
   assert.deepEqual(state.thinkingModelModes, { "gpt-5": "high" });

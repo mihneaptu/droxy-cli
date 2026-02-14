@@ -8,7 +8,7 @@ const {
   mergeProviderModelSelection,
 } = require("../src/flows/interactiveHelpers");
 
-test("buildProviderModelGroups groups known providers and sends unknown metadata to unknown bucket", () => {
+test("buildProviderModelGroups groups only explicitly attributed provider models", () => {
   const groups = buildProviderModelGroups(
     [
       { id: "claude-opus", provider: "anthropic" },
@@ -23,10 +23,9 @@ test("buildProviderModelGroups groups known providers and sends unknown metadata
     ]
   );
 
-  assert.deepEqual(groups.map((group) => group.id), ["claude", "codex", "qwen", "unknown"]);
+  assert.deepEqual(groups.map((group) => group.id), ["claude", "codex", "qwen"]);
   assert.deepEqual(groups[0].models, ["claude-opus"]);
   assert.deepEqual(groups[1].models, ["gpt-5"]);
-  assert.deepEqual(groups[3].models, ["mystery-model"]);
 });
 
 test("buildProviderModelGroups prefers explicit provider metadata over model-id family", () => {
@@ -55,7 +54,7 @@ test("buildProviderModelGroups prefers explicit provider metadata over model-id 
   assert.equal(Array.isArray(byId.get("codex")) ? byId.get("codex").length : 0, 0);
 });
 
-test("buildProviderModelGroups routes metadata-missing models to unknown bucket", () => {
+test("buildProviderModelGroups hides metadata-missing models", () => {
   const groups = buildProviderModelGroups(
     [
       { id: "gpt-5.1-codex" },
@@ -67,10 +66,7 @@ test("buildProviderModelGroups routes metadata-missing models to unknown bucket"
     ]
   );
 
-  const byId = new Map(groups.map((group) => [group.id, group.models]));
-  assert.deepEqual(byId.get("unknown"), ["claude-opus-4-5-thinking", "gpt-5.1-codex"]);
-  assert.equal(Array.isArray(byId.get("claude")) ? byId.get("claude").length : 0, 0);
-  assert.equal(Array.isArray(byId.get("codex")) ? byId.get("codex").length : 0, 0);
+  assert.deepEqual(groups, []);
 });
 
 test("buildProviderModelGroups keeps gpt-oss antigravity models in antigravity group", () => {

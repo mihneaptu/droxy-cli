@@ -468,8 +468,6 @@ function createSyncApi(overrides = {}) {
 
   function isDroxyManagedEntry(entry, host, port) {
     if (!entry) return false;
-    const displayName = entry.displayName || entry.model_display_name || "";
-    if (String(displayName).startsWith(DROXY_FACTORY_PREFIX)) return true;
     const baseUrl = entry.baseUrl || entry.base_url || "";
     if (baseUrl && isDroxyManagedBaseUrl(String(baseUrl), host, port)) return true;
     return false;

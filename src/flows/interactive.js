@@ -88,14 +88,10 @@ function createInteractiveApi(overrides = {}) {
     const providerId = providerGroup && providerGroup.id ? providerGroup.id : "";
     if (!providerId) return [];
 
-    const persistedIds = Array.isArray(persistedByProvider[providerId])
-      ? persistedByProvider[providerId]
-      : [];
     const droidIds = Array.isArray(droidSyncedByProvider[providerId])
       ? droidSyncedByProvider[providerId]
       : [];
-    const sourceIds = persistedIds.length ? persistedIds : droidIds;
-    return normalizeModelIds(sourceIds).filter((modelId) => providerGroup.models.includes(modelId));
+    return normalizeModelIds(droidIds).filter((modelId) => providerGroup.models.includes(modelId));
   }
   async function chooseModelsFlow() {
     const spinner = createSpinner("Fetching available models...").start();

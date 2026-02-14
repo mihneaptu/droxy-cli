@@ -213,6 +213,40 @@ test("getDroidManagedPaths uses DROXY_FACTORY_DIR override", () => {
   }
 });
 
+test("isDroxyManagedEntry requires base_url match and ignores Droxy name prefix alone", () => {
+  assert.equal(
+    sync.isDroxyManagedEntry(
+      {
+        displayName: "Droxy • gpt-5",
+        baseUrl: "https://example.com",
+      },
+      "127.0.0.1",
+      8317
+    ),
+    false
+  );
+  assert.equal(
+    sync.isDroxyManagedEntry(
+      {
+        model_display_name: "Droxy • gpt-5",
+      },
+      "127.0.0.1",
+      8317
+    ),
+    false
+  );
+  assert.equal(
+    sync.isDroxyManagedEntry(
+      {
+        base_url: "http://127.0.0.1:8317/v1",
+      },
+      "127.0.0.1",
+      8317
+    ),
+    true
+  );
+});
+
 test("splitModelsForFactoryEntries classifies providers", () => {
   const split = sync.splitModelsForFactoryEntries([
     { id: "gpt-5", provider: "openai" },

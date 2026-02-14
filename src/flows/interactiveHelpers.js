@@ -151,7 +151,6 @@ function buildProviderModelGroups(entries, providerStatuses) {
     });
   }
 
-  const unknownModels = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     const modelId = extractModelIdFromEntry(entry);
     if (!modelId) continue;
@@ -160,17 +159,12 @@ function buildProviderModelGroups(entries, providerStatuses) {
     if (explicitProviderId) {
       if (providerMap.has(explicitProviderId)) {
         providerMap.get(explicitProviderId).models.push(modelId);
-      } else {
-        unknownModels.push(modelId);
       }
-      continue;
     }
-    unknownModels.push(modelId);
   }
 
   const connected = [];
   const disconnected = [];
-  const unknown = [];
   for (const provider of providerMap.values()) {
     const models = normalizeModelIds(provider.models);
     if (!models.length) continue;
@@ -179,22 +173,10 @@ function buildProviderModelGroups(entries, providerStatuses) {
     else disconnected.push(item);
   }
 
-  const normalizedUnknownModels = normalizeModelIds(unknownModels);
-  if (normalizedUnknownModels.length) {
-    unknown.push({
-      id: "unknown",
-      label: "Unknown (unverified)",
-      connected: false,
-      connectionState: "unknown",
-      models: normalizedUnknownModels,
-    });
-  }
-
   connected.sort((a, b) => a.label.localeCompare(b.label));
   disconnected.sort((a, b) => a.label.localeCompare(b.label));
-  unknown.sort((a, b) => a.label.localeCompare(b.label));
 
-  return connected.concat(disconnected, unknown);
+  return connected.concat(disconnected);
 }
 
 function mergeProviderModelSelection(
