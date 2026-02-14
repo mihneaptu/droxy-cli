@@ -786,9 +786,11 @@ test("fetchProviderConnectionStatus reads verified provider connection states fr
         statusCode: 200,
         body: {
           files: [
-            { provider: "openai", connected: true },
+            { provider: "openai", status: "active" },
             { provider: "anthropic", authenticated: false },
             { provider: "qwen", status: "connected" },
+            { provider: "iflow", status: "error" },
+            { provider: "gemini-cli", status: "active" },
           ],
         },
       },
@@ -806,11 +808,13 @@ test("fetchProviderConnectionStatus reads verified provider connection states fr
   );
 
   assert.equal(status.providersState, "verified");
-  assert.equal(status.providersConnected, 2);
+  assert.equal(status.providersConnected, 3);
   assert.deepEqual(status.byProvider, {
     codex: { connected: true, connectionState: "connected", verified: true },
     claude: { connected: false, connectionState: "disconnected", verified: true },
     qwen: { connected: true, connectionState: "connected", verified: true },
+    iflow: { connected: false, connectionState: "disconnected", verified: true },
+    gemini: { connected: true, connectionState: "connected", verified: true },
   });
 });
 
