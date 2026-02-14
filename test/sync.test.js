@@ -810,12 +810,139 @@ test("fetchProviderConnectionStatus reads verified provider connection states fr
   assert.equal(status.providersState, "verified");
   assert.equal(status.providersConnected, 3);
   assert.deepEqual(status.byProvider, {
-    codex: { connected: true, connectionState: "connected", verified: true },
-    claude: { connected: false, connectionState: "disconnected", verified: true },
-    qwen: { connected: true, connectionState: "connected", verified: true },
-    iflow: { connected: false, connectionState: "disconnected", verified: true },
-    gemini: { connected: true, connectionState: "connected", verified: true },
+    codex: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
+    claude: { connected: false, connectionState: "disconnected", verified: true, connectionCount: 0 },
+    qwen: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
+    iflow: { connected: false, connectionState: "disconnected", verified: true, connectionCount: 0 },
+    gemini: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
   });
+});
+
+test("fetchManagedAuthFiles returns normalized multi-account rows", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              path: "C:/auth/openai-main.json",
+              auth_index: 1,
+              account: "Primary",
+              email: "user@example.com",
+              account_type: "chatgpt",
+              status: "connected",
+              status_message: "",
+            },
+            {
+              provider: "gemini-cli",
+              name: "gemini-runtime.json",
+              path: "C:/auth/gemini-runtime.json",
+              runtime_only: true,
+              status: "active",
+              status_message: "",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const rows = await api.fetchManagedAuthFiles(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(Array.isArray(rows), true);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].providerId, "codex");
+  assert.equal(rows[0].connected, true);
+  assert.equal(rows[0].connectionState, "connected");
+  assert.equal(rows[0].removable, true);
+  assert.equal(rows[0].accountType, "chatgpt");
+  assert.equal(rows[1].providerId, "gemini");
+  assert.equal(rows[1].connected, true);
+  assert.equal(rows[1].runtimeOnly, true);
+  assert.equal(rows[1].removable, false);
+});
+
+test("removeManagedAuthFile uses DELETE auth-files endpoint with name/index query", async () => {
+  let requestMethod = "";
+  let requestName = "";
+  let requestIndex = "";
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": ({ url, options }) => {
+        const parsed = new URL(url);
+        requestMethod = String((options && options.method) || "").toUpperCase();
+        requestName = parsed.searchParams.get("name") || "";
+        requestIndex = parsed.searchParams.get("index") || "";
+        return {
+          statusCode: 200,
+          body: { success: true },
+        };
+      },
+    }),
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "openai-main.json",
+      authIndex: 2,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(requestMethod, "DELETE");
+  assert.equal(requestName, "openai-main.json");
+  assert.equal(requestIndex, "2");
+  assert.equal(result.success, true);
+});
+
+test("removeManagedAuthFile blocks runtime-only entries", async () => {
+  let requestCalls = 0;
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v0/management/auth-files": () => {
+        requestCalls += 1;
+        return {
+          statusCode: 200,
+          body: { success: true },
+        };
+      },
+    }),
+  });
+
+  const result = await api.removeManagedAuthFile(
+    {
+      host: "127.0.0.1",
+      port: 8317,
+      tlsEnabled: false,
+      managementKey: "mgmt",
+    },
+    {
+      name: "runtime.json",
+      runtimeOnly: true,
+    },
+    { protocol: "http" }
+  );
+
+  assert.equal(requestCalls, 0);
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "runtime_only");
 });
 
 test("fetchProviderConnectionStatusSafe returns unknown when management key is unavailable", async () => {

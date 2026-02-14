@@ -39,7 +39,7 @@ Core runtime modules:
 Interactive flows:
 - `src/flows/interactive.js`: interactive home loop and action orchestration.
 - `src/flows/interactiveSelection.js`: provider/model/thinking selection flows.
-- `src/flows/interactiveProviderActions.js`: interactive connect/start/stop/status actions.
+- `src/flows/interactiveProviderActions.js`: interactive connect/start/stop/status actions plus accounts refresh/remove flows.
 - `src/flows/interactiveHome.js`, `src/flows/interactiveAccounts.js`, `src/flows/interactiveAutoSync.js`, `src/flows/interactiveHelpers.js`: menu context, accounts, drift auto-sync, helper logic.
 
 UI layer:

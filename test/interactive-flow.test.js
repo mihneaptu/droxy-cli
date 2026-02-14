@@ -1167,7 +1167,7 @@ test("accounts menu can list status and connect account", async () => {
           const label = homePromptCount === 1 ? "Accounts" : "Exit";
           return { cancelled: false, index: payload.items.indexOf(label), value: label };
         }
-        if (/Connected Accounts/i.test(payload.title || "")) {
+        if (/^Connected Accounts(\r?\n|$)/i.test(payload.title || "")) {
           return { cancelled: false, index: 0, value: payload.items[0] };
         }
         if (/Accounts/i.test(payload.title || "")) {
@@ -1209,10 +1209,128 @@ test("accounts menu can list status and connect account", async () => {
     true
   );
   assert.equal(accountsPrompt.items.includes("Connect Account"), true);
+  assert.equal(accountsPrompt.items.includes("Refresh Account Status"), true);
+  assert.equal(accountsPrompt.items.some((item) => /^Remove Account/i.test(item)), true);
   assert.equal(Boolean(connectedListPrompt), true);
   assert.match(connectedListPrompt.title, /Connected accounts:\s+2/i);
   assert.match(connectedListPrompt.title, /Connected \(2\)/i);
   assert.deepEqual(loginCalls, [{ providerId: "claude", quiet: false }]);
+});
+
+test("accounts menu can remove an account from managed auth files", async () => {
+  const outputCalls = [];
+  const selectSingleCalls = [];
+  const removeCalls = [];
+  let homePromptCount = 0;
+  let accountsPromptCount = 0;
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 8317,
+      }),
+      readState: () => ({ apiKey: "k", managementKey: "mgmt" }),
+      updateState: () => ({}),
+      configExists: () => true,
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "codex", label: "OpenAI / Codex" }],
+      getProvidersWithConnectionStatus: (configValues) => {
+        const byProvider = configValues && configValues.providerStatusById
+          ? configValues.providerStatusById
+          : {};
+        const codex = byProvider.codex || {};
+        return [{
+          id: "codex",
+          label: "OpenAI / Codex",
+          connected: codex.connected === true,
+          connectionCount: Number(codex.connectionCount) || 0,
+          connectionState: codex.connectionState || "unknown",
+        }];
+      },
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async () => ({ cancelled: true, selected: [] }),
+      selectSingle: async (payload) => {
+        selectSingleCalls.push(payload);
+        if (/Droxy Interactive/i.test(payload.title || "")) {
+          homePromptCount += 1;
+          const label = homePromptCount === 1 ? "Accounts" : "Exit";
+          return { cancelled: false, index: payload.items.indexOf(label), value: label };
+        }
+        if (/^Accounts(\r?\n|$)/i.test(payload.title || "")) {
+          accountsPromptCount += 1;
+          const label = accountsPromptCount === 1
+            ? payload.items.find((item) => /^Remove Account/i.test(item))
+            : "Back to Menu";
+          return { cancelled: false, index: payload.items.indexOf(label), value: label };
+        }
+        if (/^Remove Account(\r?\n|$)/i.test(payload.title || "")) {
+          return { cancelled: false, index: 0, value: payload.items[0] };
+        }
+        if (/^Confirm Account Removal/i.test(payload.title || "")) {
+          return { cancelled: false, index: payload.items.indexOf("Remove Account"), value: "Remove Account" };
+        }
+        return { cancelled: true, index: -1, value: "" };
+      },
+    },
+    output: createOutputStub(outputCalls),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      fetchProviderConnectionStatusSafe: async () => ({
+        providersState: "verified",
+        providersConnected: 1,
+        byProvider: {
+          codex: { connected: true, connectionState: "connected", verified: true, connectionCount: 1 },
+        },
+      }),
+      fetchManagedAuthFilesSafe: async () => ([
+        {
+          providerId: "codex",
+          name: "openai-main.json",
+          path: "C:/auth/openai-main.json",
+          authIndex: 1,
+          account: "primary",
+          email: "user@example.com",
+          accountType: "chatgpt",
+          connectionState: "connected",
+          connected: true,
+          runtimeOnly: false,
+          removable: true,
+        },
+      ]),
+      removeManagedAuthFileSafe: async (configValues, fileRef, options) => {
+        removeCalls.push({ configValues, fileRef, options });
+        return { success: true, removed: true };
+      },
+      syncDroidSettings: async () => ({ success: true }),
+    },
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(removeCalls.length, 1);
+  assert.equal(removeCalls[0].fileRef.name, "openai-main.json");
+  assert.equal(removeCalls[0].fileRef.authIndex, 1);
+  assert.equal(
+    outputCalls.some((entry) => entry[0] === "printSuccess" && /Removed account:/i.test(entry[1])),
+    true
+  );
+  assert.equal(
+    selectSingleCalls.some((payload) => /^Confirm Account Removal/i.test(String(payload.title || ""))),
+    true
+  );
 });
 
 test("accounts menu uses verified provider status from management API when available", async () => {
