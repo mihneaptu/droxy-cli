@@ -786,7 +786,7 @@ test("fetchProviderConnectionStatus reads verified provider connection states fr
         statusCode: 200,
         body: {
           files: [
-            { provider: "openai", status: "active" },
+            { provider: "openai", connected: true },
             { provider: "anthropic", authenticated: false },
             { provider: "qwen", status: "connected" },
             { provider: "iflow", status: "error" },
