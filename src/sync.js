@@ -1020,6 +1020,7 @@ function createSyncApi(overrides = {}) {
     managementKey,
     method = "GET",
     body,
+    allowEmptySuccessBody = false,
   }) {
     if (!managementKey) return null;
     const url = buildProxyUrl({
@@ -1034,6 +1035,7 @@ function createSyncApi(overrides = {}) {
         return await requestJsonWithOptions(url, {
           method,
           body,
+          allowEmptySuccessBody,
           headers: { Accept: "application/json", ...headers },
         });
       } catch (err) {
@@ -1413,6 +1415,7 @@ function createSyncApi(overrides = {}) {
         suffix: `${MANAGEMENT_AUTH_FILES_PATH}?${params.toString()}`,
         managementKey,
         method: "DELETE",
+        allowEmptySuccessBody: true,
       });
       if (!payload) {
         return { success: false, reason: "auth_failed", message: "Management authorization failed." };
@@ -1538,7 +1541,11 @@ function createSyncApi(overrides = {}) {
           }
           const trimmed = body.trim();
           if (!trimmed) {
-            resolve({});
+            if (requestOptions.allowEmptySuccessBody === true) {
+              resolve({});
+              return;
+            }
+            reject(new Error("Empty response body"));
             return;
           }
           try {

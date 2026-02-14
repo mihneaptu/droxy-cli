@@ -1021,6 +1021,74 @@ test("removeManagedAuthFile treats 204 no-content as successful removal", async 
   assert.equal(result.removed, true);
 });
 
+test("syncDroidSettings treats empty /v1/models body as detect failure, not selection clear", async () => {
+  let modelRequestCount = 0;
+  const api = sync.createSyncApi({
+    config: {
+      DEFAULT_PORT: 8317,
+      configExists: () => true,
+      ensureDir: () => {},
+      readConfigValues: () => ({
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+        apiKey: "k",
+        managementKey: "",
+      }),
+      readState: () => ({ apiKey: "k", managementKey: "" }),
+      updateState: () => {
+        throw new Error("updateState should not run on detect_failed");
+      },
+    },
+    http: {
+      request: (url, _options, callback) => {
+        const req = new EventEmitter();
+        req.setTimeout = () => {};
+        req.destroy = (err) => {
+          if (err) {
+            process.nextTick(() => req.emit("error", err));
+          }
+        };
+        req.end = () => {
+          process.nextTick(() => {
+            const pathname = new URL(url).pathname;
+            const res = new EventEmitter();
+            res.resume = () => {};
+            if (pathname === "/v1/models") {
+              modelRequestCount += 1;
+              res.statusCode = 200;
+              callback(res);
+              res.emit("data", "");
+              res.emit("end");
+              return;
+            }
+            res.statusCode = 404;
+            callback(res);
+            res.emit("data", "{\"error\":\"not found\"}");
+            res.emit("end");
+          });
+        };
+        return req;
+      },
+    },
+    output: {
+      printGuidedError: () => {},
+      printSuccess: () => {},
+      printWarning: () => {},
+    },
+  });
+
+  const result = await api.syncDroidSettings({
+    quiet: true,
+    selectedModels: ["gpt-5"],
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "detect_failed");
+  assert.equal(result.result && result.result.reason, "detect_failed");
+  assert.equal(modelRequestCount >= 2, true);
+});
+
 test("removeManagedAuthFile blocks runtime-only entries", async () => {
   let requestCalls = 0;
   const api = sync.createSyncApi({
