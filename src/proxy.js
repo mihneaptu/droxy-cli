@@ -312,6 +312,8 @@ function createProxyApi(overrides = {}) {
         : 0;
     const providersState =
       providerStatus && providerStatus.providersState === "verified" ? "verified" : "unknown";
+    const thinkingState =
+      state && state.thinkingState === "verified" ? "verified" : "unknown";
 
     let uptime = null;
     if (status.running && state.startedAt) {
@@ -333,6 +335,7 @@ function createProxyApi(overrides = {}) {
       providers: providersConnected,
       providersConnected,
       providersState,
+      thinkingState,
     };
 
     if (json) {
@@ -344,6 +347,7 @@ function createProxyApi(overrides = {}) {
       output.log(`Status:    ${statusState}`);
       output.log(`Endpoint:  ${(values.tlsEnabled ? "https" : "http")}://${values.host}:${values.port}/v1`);
       output.log(`Providers: ${providersConnected} (${providersState})`);
+      output.log(`Thinking:  ${thinkingState}`);
       if (status.pid) output.log(`PID:       ${status.pid}`);
       if (uptime) output.log(`Uptime:    ${uptime}`);
       if (verbose) {

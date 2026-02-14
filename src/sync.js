@@ -8,6 +8,7 @@ const path = require("path");
 
 const configModule = require("./config");
 const helpersModule = require("./helpers");
+const thinkingCapabilities = require("./thinkingCapabilities");
 const outputModule = require("./ui/output");
 
 const DROXY_FACTORY_PREFIX = "Droxy • ";
@@ -82,6 +83,70 @@ const MODEL_STATUS_HINT_PATHS = Object.freeze([
   ["meta", "state"],
   ["meta", "access", "status"],
   ["meta", "entitlement", "status"],
+]);
+const THINKING_SUPPORT_HINT_PATHS = Object.freeze([
+  ["thinking"],
+  ["thinking", "enabled"],
+  ["thinking", "supported"],
+  ["thinking", "available"],
+  ["thinking", "allowed"],
+  ["reasoning"],
+  ["reasoning", "enabled"],
+  ["reasoning", "supported"],
+  ["reasoning", "available"],
+  ["reasoning", "allowed"],
+  ["capabilities", "thinking"],
+  ["capabilities", "reasoning"],
+  ["features", "thinking"],
+  ["features", "reasoning"],
+  ["meta", "thinking"],
+  ["meta", "reasoning"],
+  ["meta", "capabilities", "thinking"],
+  ["meta", "capabilities", "reasoning"],
+]);
+const THINKING_ALLOWED_MODES_HINT_PATHS = Object.freeze([
+  ["thinking_modes"],
+  ["thinkingModes"],
+  ["reasoning_modes"],
+  ["reasoningModes"],
+  ["thinking", "modes"],
+  ["thinking", "allowed_modes"],
+  ["thinking", "allowedModes"],
+  ["thinking", "supported_modes"],
+  ["thinking", "supportedModes"],
+  ["reasoning", "modes"],
+  ["reasoning", "allowed_modes"],
+  ["reasoning", "allowedModes"],
+  ["reasoning", "supported_modes"],
+  ["reasoning", "supportedModes"],
+  ["capabilities", "thinking_modes"],
+  ["capabilities", "thinkingModes"],
+  ["capabilities", "reasoning_modes"],
+  ["capabilities", "reasoningModes"],
+  ["meta", "thinking_modes"],
+  ["meta", "thinkingModes"],
+  ["meta", "reasoning_modes"],
+  ["meta", "reasoningModes"],
+  ["meta", "thinking", "modes"],
+  ["meta", "reasoning", "modes"],
+]);
+const THINKING_STATUS_HINT_PATHS = Object.freeze([
+  ["thinking_status"],
+  ["thinkingStatus"],
+  ["reasoning_status"],
+  ["reasoningStatus"],
+  ["thinking", "status"],
+  ["thinking", "state"],
+  ["thinking", "availability"],
+  ["reasoning", "status"],
+  ["reasoning", "state"],
+  ["reasoning", "availability"],
+  ["meta", "thinking_status"],
+  ["meta", "thinkingStatus"],
+  ["meta", "reasoning_status"],
+  ["meta", "reasoningStatus"],
+  ["meta", "thinking", "status"],
+  ["meta", "reasoning", "status"],
 ]);
 const RESTRICTED_STATUS_VALUES = new Set([
   "blocked",
@@ -346,10 +411,45 @@ function createSyncApi(overrides = {}) {
     typeof helpers.isAdvancedThinkingMode === "function"
       ? helpers.isAdvancedThinkingMode
       : helpersModule.isAdvancedThinkingMode;
-  const supportsAdvancedThinkingModes =
-    typeof helpers.supportsAdvancedThinkingModes === "function"
-      ? helpers.supportsAdvancedThinkingModes
-      : helpersModule.supportsAdvancedThinkingModes;
+  const DEFAULT_THINKING_ALLOWED_MODES = thinkingCapabilities.DEFAULT_THINKING_ALLOWED_MODES;
+  const THINKING_MODE_VALUES = thinkingCapabilities.THINKING_MODE_VALUES;
+  const normalizeAllowedThinkingModesShared = thinkingCapabilities.normalizeAllowedThinkingModes;
+  const normalizeThinkingCapabilityShared = thinkingCapabilities.normalizeThinkingCapability;
+  const buildThinkingCapabilityByModelIdShared = thinkingCapabilities.buildThinkingCapabilityByModelId;
+  const resolveThinkingCapabilityForModelShared =
+    thinkingCapabilities.resolveThinkingCapabilityForModel;
+  const thinkingCapabilityOptions = {
+    normalizeThinkingMode,
+    stripThinkingSuffix,
+    thinkingModeValues: THINKING_MODE_VALUES,
+    defaultAllowedModes: DEFAULT_THINKING_ALLOWED_MODES,
+  };
+
+  function normalizeAllowedThinkingModes(value, options = {}) {
+    return normalizeAllowedThinkingModesShared(value, {
+      ...thinkingCapabilityOptions,
+      ...options,
+    });
+  }
+
+  function normalizeThinkingCapability(value, options = {}) {
+    return normalizeThinkingCapabilityShared(value, {
+      ...thinkingCapabilityOptions,
+      ...options,
+    });
+  }
+
+  function buildThinkingCapabilityByModelId(entries) {
+    return buildThinkingCapabilityByModelIdShared(entries, thinkingCapabilityOptions);
+  }
+
+  function resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId = {}) {
+    return resolveThinkingCapabilityForModelShared(
+      modelId,
+      thinkingCapabilityByModelId,
+      thinkingCapabilityOptions
+    );
+  }
 
   function normalizeThinkingModelIds(thinkingModels) {
     return normalizeSelectedModelIds(thinkingModels)
@@ -357,24 +457,151 @@ function createSyncApi(overrides = {}) {
       .filter(Boolean);
   }
 
-  function normalizeThinkingModeForModel(modelId, mode) {
-    const normalizedMode = normalizeThinkingMode(mode);
-    if (!normalizedMode) return "";
-    if (normalizedMode === "none") return "none";
-    if (normalizedMode === "auto") return "auto";
-    if (!isAdvancedThinkingMode(normalizedMode)) return "auto";
-    if (!supportsAdvancedThinkingModes(modelId)) return "auto";
-    return normalizedMode;
+  function parseThinkingSupportState(value) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const key of [
+        "supported",
+        "enabled",
+        "available",
+        "allowed",
+        "value",
+        "status",
+        "state",
+      ]) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+        const nested = parseThinkingSupportState(value[key]);
+        if (nested !== null) return nested;
+      }
+      const nestedModes = normalizeAllowedThinkingModes(value, {
+        includeAuto: false,
+        includeNone: false,
+      });
+      if (nestedModes.length) return true;
+      return null;
+    }
+
+    const allowHint = parseAllowHint(value);
+    if (allowHint === true) return true;
+    if (allowHint === false) return false;
+
+    const denyHint = parseDenyHint(value);
+    if (denyHint === true) return false;
+    if (denyHint === false) return true;
+
+    if (isRestrictedStatusValue(value)) return false;
+    return null;
   }
 
-  function appendThinkingVariant(baseModelId, mode, outputModels) {
-    const normalizedMode = normalizeThinkingModeForModel(baseModelId, mode);
+  function extractThinkingCapability(item) {
+    if (!item || typeof item !== "object") {
+      return normalizeThinkingCapability(null);
+    }
+
+    const supportHint = firstDefinedPathValue(item, THINKING_SUPPORT_HINT_PATHS);
+    const modesHint = firstDefinedPathValue(item, THINKING_ALLOWED_MODES_HINT_PATHS);
+    const statusHint = firstDefinedPathValue(item, THINKING_STATUS_HINT_PATHS);
+
+    const supportStateDirect = parseThinkingSupportState(supportHint);
+    const supportStateFromStatus = parseThinkingSupportState(statusHint);
+    const supportState =
+      supportStateDirect !== null ? supportStateDirect : supportStateFromStatus;
+    const modesFromSupportHint =
+      modesHint === undefined &&
+      supportHint &&
+      typeof supportHint === "object"
+        ? normalizeAllowedThinkingModes(supportHint, {
+            includeAuto: false,
+            includeNone: false,
+          })
+        : [];
+    const effectiveModesHint =
+      modesHint !== undefined
+        ? modesHint
+        : modesFromSupportHint.length
+          ? supportHint
+          : undefined;
+    const hasExplicitModesHint = effectiveModesHint !== undefined;
+
+    if (supportState === false) {
+      return normalizeThinkingCapability({
+        verified: true,
+        supported: false,
+      });
+    }
+
+    if (hasExplicitModesHint) {
+      return normalizeThinkingCapability({
+        verified: true,
+        supported: true,
+        allowedModes: effectiveModesHint,
+      });
+    }
+
+    if (supportState === true) {
+      return normalizeThinkingCapability(
+        {
+          verified: true,
+          supported: true,
+        },
+        { thinkingModeValues: THINKING_MODE_VALUES }
+      );
+    }
+
+    return normalizeThinkingCapability({
+      verified: false,
+      supported: false,
+      allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+    });
+  }
+
+  function resolveThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId = {}) {
+    const normalizedMode = normalizeThinkingMode(mode);
+    if (!normalizedMode) {
+      return { mode: "", downgraded: false, reason: "" };
+    }
+    if (normalizedMode === "none" || normalizedMode === "auto") {
+      return { mode: normalizedMode, downgraded: false, reason: "" };
+    }
+    if (!isAdvancedThinkingMode(normalizedMode)) {
+      return { mode: "auto", downgraded: true, reason: "invalid_advanced_mode" };
+    }
+
+    const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+    if (!capability.verified) {
+      return { mode: "auto", downgraded: true, reason: "backend_unverified" };
+    }
+    if (capability.supported !== true) {
+      return { mode: "auto", downgraded: true, reason: "backend_unsupported" };
+    }
+
+    const allowedModes = new Set(normalizeAllowedThinkingModes(capability.allowedModes));
+    if (!allowedModes.has(normalizedMode)) {
+      return { mode: "auto", downgraded: true, reason: "mode_not_allowed" };
+    }
+
+    return { mode: normalizedMode, downgraded: false, reason: "" };
+  }
+
+  function normalizeThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId = {}) {
+    return resolveThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId).mode;
+  }
+
+  function appendThinkingVariant(baseModelId, mode, outputModels, thinkingCapabilityByModelId = {}) {
+    const normalizedMode = normalizeThinkingModeForModel(
+      baseModelId,
+      mode,
+      thinkingCapabilityByModelId
+    );
     if (!normalizedMode) return;
     if (normalizedMode === "none") return;
     outputModels.push(`${baseModelId}(${normalizedMode})`);
   }
 
-  function expandProviderModelsWithThinkingVariants(providerModels, thinkingModelModes) {
+  function expandProviderModelsWithThinkingVariants(
+    providerModels,
+    thinkingModelModes,
+    thinkingCapabilityByModelId = {}
+  ) {
     const expanded = [];
     const seen = new Set();
     const normalizedModes = normalizeThinkingModelModes(thinkingModelModes);
@@ -389,7 +616,7 @@ function createSyncApi(overrides = {}) {
       const mode = normalizedModes[stripThinkingSuffix(modelId).toLowerCase()];
       if (!mode) continue;
       const variants = [];
-      appendThinkingVariant(modelId, mode, variants);
+      appendThinkingVariant(modelId, mode, variants, thinkingCapabilityByModelId);
       for (const variant of variants) {
         if (seen.has(variant)) continue;
         seen.add(variant);
@@ -482,6 +709,7 @@ function createSyncApi(overrides = {}) {
     openAiModels,
     anthropicModels,
     thinkingModelModes,
+    thinkingCapabilityByModelId,
   }) {
     const scheme = protocol || (tlsEnabled ? "https" : "http");
     const resolvedHost = normalizedHost(host);
@@ -489,11 +717,13 @@ function createSyncApi(overrides = {}) {
     const entries = [];
     const openAiExpandedModels = expandProviderModelsWithThinkingVariants(
       openAiModels,
-      thinkingModelModes
+      thinkingModelModes,
+      thinkingCapabilityByModelId
     );
     const anthropicExpandedModels = expandProviderModelsWithThinkingVariants(
       anthropicModels,
-      thinkingModelModes
+      thinkingModelModes,
+      thinkingCapabilityByModelId
     );
 
     for (const model of openAiExpandedModels) {
@@ -1759,6 +1989,7 @@ function createSyncApi(overrides = {}) {
         provider: "",
         created: 0,
         entitlement: {},
+        thinking: normalizeThinkingCapability(null),
         raw: { id: item },
       };
     }
@@ -1791,6 +2022,7 @@ function createSyncApi(overrides = {}) {
       provider: provider ? String(provider) : "",
       created: Number(created) || 0,
       entitlement: extractEntitlementHints(item),
+      thinking: extractThinkingCapability(item),
       raw: item,
     };
   }
@@ -1982,6 +2214,7 @@ function createSyncApi(overrides = {}) {
       config.updateState({
         lastFactorySyncAt: new Date().toISOString(),
         selectedModels: [],
+        thinkingState: "unknown",
         thinkingModels: [],
         thinkingModelModes: {},
         factory: {
@@ -2011,9 +2244,48 @@ function createSyncApi(overrides = {}) {
     }
 
     detectedEntries = filtered.entries;
+    const thinkingCapabilityByModelId = buildThinkingCapabilityByModelId(detectedEntries);
+    const notifyThinkingModeDowngrade = (
+      modelId,
+      requestedMode,
+      reason,
+      warningDedupSet
+    ) => {
+      const safeModelId = String(modelId || "").trim();
+      const safeRequestedMode = normalizeThinkingMode(requestedMode);
+      if (!safeModelId || !safeRequestedMode) return;
+      const warningKey = `${safeModelId.toLowerCase()}:${safeRequestedMode}`;
+      if (warningDedupSet && warningDedupSet.has(warningKey)) return;
+      if (warningDedupSet) warningDedupSet.add(warningKey);
+      if (quiet) return;
+
+      if (output && typeof output.printThinkingModeDowngrade === "function") {
+        output.printThinkingModeDowngrade({
+          modelId: safeModelId,
+          requestedMode: safeRequestedMode,
+          fallbackMode: "auto",
+          reason,
+        });
+        return;
+      }
+
+      if (output && typeof output.printWarning === "function") {
+        output.printWarning(
+          `Thinking mode '${safeRequestedMode}' for ${safeModelId} is not backend-verified. Using auto.`
+        );
+      }
+    };
     const syncedModelIds = normalizeSelectedModelIds(
       detectedEntries.map((entry) => (entry && entry.id ? entry.id : ""))
     );
+    const thinkingState =
+      syncedModelIds.length > 0 &&
+      syncedModelIds.every(
+        (modelId) =>
+          resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId).verified === true
+      )
+        ? "verified"
+        : "unknown";
     const explicitThinkingModelModes = normalizeThinkingModelModes(state.thinkingModelModes || {});
     const fallbackThinkingModelSet = new Set(
       normalizeThinkingModelIds(state.thinkingModels || []).map((modelId) =>
@@ -2021,20 +2293,45 @@ function createSyncApi(overrides = {}) {
       )
     );
     const thinkingModelModes = {};
+    const thinkingModeDowngradeWarnings = new Set();
     for (const modelId of syncedModelIds) {
       const normalizedId = String(modelId).toLowerCase();
-      const explicitMode = normalizeThinkingModeForModel(
+      const explicitRequestedMode = explicitThinkingModelModes[normalizedId];
+      const explicitModeOutcome = resolveThinkingModeForModel(
         modelId,
-        explicitThinkingModelModes[normalizedId]
+        explicitRequestedMode,
+        thinkingCapabilityByModelId
       );
+      const explicitMode = explicitModeOutcome.mode;
       if (explicitMode) {
         if (explicitMode === "none") continue;
+        if (explicitModeOutcome.downgraded) {
+          notifyThinkingModeDowngrade(
+            modelId,
+            explicitRequestedMode,
+            explicitModeOutcome.reason,
+            thinkingModeDowngradeWarnings
+          );
+        }
         thinkingModelModes[modelId] = explicitMode;
         continue;
       }
       if (fallbackThinkingModelSet.has(normalizedId)) {
-        const fallbackMode = normalizeThinkingModeForModel(modelId, "medium");
+        const fallbackModeOutcome = resolveThinkingModeForModel(
+          modelId,
+          "medium",
+          thinkingCapabilityByModelId
+        );
+        const fallbackMode = fallbackModeOutcome.mode;
         if (fallbackMode && fallbackMode !== "none") {
+          if (fallbackModeOutcome.downgraded) {
+            notifyThinkingModeDowngrade(
+              modelId,
+              "medium",
+              fallbackModeOutcome.reason,
+              thinkingModeDowngradeWarnings
+            );
+          }
           thinkingModelModes[modelId] = fallbackMode;
         }
       }
@@ -2062,6 +2359,7 @@ function createSyncApi(overrides = {}) {
           openAiModels: split.openai,
           anthropicModels: split.anthropic,
           thinkingModelModes,
+          thinkingCapabilityByModelId,
         }),
       };
     }
@@ -2073,6 +2371,7 @@ function createSyncApi(overrides = {}) {
         : syncedModelIds.length
           ? { selectedModels: syncedModelIds }
           : {}),
+      thinkingState,
       thinkingModels: thinkingModelIds,
       thinkingModelModes,
       factory: {

@@ -7,6 +7,7 @@ const path = require("path");
 const test = require("node:test");
 
 const {
+  buildThinkingCapabilityByModelId,
   normalizeThinkingModelModeHistory,
   promptThinkingModelModes,
   readDroidSyncedModelsByProvider,
@@ -232,10 +233,89 @@ test("resolveThinkingModels preserves saved thinking selection when present", ()
   assert.deepEqual(models, ["gpt-5", "model-reasoning"]);
 });
 
+test("resolveThinkingModels prefers backend-verified thinking support when available", () => {
+  const models = resolveThinkingModels(
+    ["gpt-5", "model-reasoning"],
+    [],
+    {
+      hasSavedThinkingSelection: false,
+      thinkingCapabilityByModelId: {
+        "gpt-5": {
+          supported: true,
+          verified: true,
+          allowedModes: ["auto", "medium", "high", "none"],
+        },
+        "model-reasoning": {
+          supported: false,
+          verified: true,
+          allowedModes: ["auto", "none"],
+        },
+      },
+    }
+  );
+
+  assert.deepEqual(models, ["gpt-5"]);
+});
+
+test("buildThinkingCapabilityByModelId keeps explicit non-advanced backend mode lists", () => {
+  const byModelId = buildThinkingCapabilityByModelId([
+    {
+      id: "gpt-5",
+      thinking: {
+        verified: true,
+        supported: true,
+        allowedModes: ["auto"],
+      },
+    },
+  ]);
+
+  assert.deepEqual(byModelId["gpt-5"], {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "none"],
+  });
+});
+
+test("buildThinkingCapabilityByModelId parses mode maps with allow semantics", () => {
+  const byModelId = buildThinkingCapabilityByModelId([
+    {
+      id: "gpt-5",
+      thinking: {
+        verified: true,
+        supported: true,
+        allowedModes: {
+          medium: true,
+          high: false,
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(byModelId["gpt-5"], {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "medium", "none"],
+  });
+});
+
 test("resolveThinkingModelModes keeps saved mode and defaults missing mode to medium", () => {
   const modes = resolveThinkingModelModes(
     ["gpt-5", "claude-opus"],
-    { "gpt-5": "high", "claude-opus": "invalid" }
+    { "gpt-5": "high", "claude-opus": "invalid" },
+    {
+      thinkingCapabilityByModelId: {
+        "gpt-5": {
+          supported: true,
+          verified: true,
+          allowedModes: ["auto", "medium", "high", "none"],
+        },
+        "claude-opus": {
+          supported: true,
+          verified: true,
+          allowedModes: ["auto", "medium", "none"],
+        },
+      },
+    }
   );
 
   assert.deepEqual(modes, {
@@ -254,7 +334,16 @@ test("promptThinkingModelModes keeps current mode when selection is cancelled", 
       },
     },
     ["gpt-5"],
-    { "gpt-5": "low" }
+    { "gpt-5": "low" },
+    {
+      thinkingCapabilityByModelId: {
+        "gpt-5": {
+          supported: true,
+          verified: true,
+          allowedModes: ["auto", "low", "medium", "none"],
+        },
+      },
+    }
   );
 
   assert.deepEqual(calls, ["Thinking mode • gpt-5"]);
@@ -271,7 +360,16 @@ test("promptThinkingModelModes exposes full thinking mode menu", async () => {
       },
     },
     ["gpt-5"],
-    { "gpt-5": "medium" }
+    { "gpt-5": "medium" },
+    {
+      thinkingCapabilityByModelId: {
+        "gpt-5": {
+          supported: true,
+          verified: true,
+          allowedModes: ["auto", "minimal", "low", "medium", "high", "xhigh", "none"],
+        },
+      },
+    }
   );
 
   assert.equal(menuPayloads.length, 1);
@@ -284,6 +382,23 @@ test("promptThinkingModelModes exposes full thinking mode menu", async () => {
     "Xhigh",
     "None",
   ]);
+});
+
+test("promptThinkingModelModes limits unknown capability models to auto and none", async () => {
+  const menuPayloads = [];
+  await promptThinkingModelModes(
+    {
+      selectSingle: async (payload) => {
+        menuPayloads.push(payload);
+        return { cancelled: true, index: -1, value: "" };
+      },
+    },
+    ["gpt-5"],
+    { "gpt-5": "high" }
+  );
+
+  assert.equal(menuPayloads.length, 1);
+  assert.deepEqual(menuPayloads[0].items, ["Auto", "None"]);
 });
 
 test("normalizeThinkingModelModeHistory dedupes valid modes and drops invalid entries", () => {

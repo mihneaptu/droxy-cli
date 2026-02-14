@@ -11,6 +11,7 @@ const { autoSyncSelectedModelsIfDrifted } = require("./interactiveAutoSync");
 const { getMenuContext, promptHomeAction } = require("./interactiveHome");
 const { createInteractiveProviderActions } = require("./interactiveProviderActions");
 const {
+  buildThinkingCapabilityByModelId,
   fetchModelEntriesForSelection,
   getConnectedProvidersWithStatus,
   normalizeThinkingModelModeHistory,
@@ -126,6 +127,7 @@ function createInteractiveApi(overrides = {}) {
     const detectedModelIds = normalizeModelIds(
       modelEntries.map((entry) => (entry && entry.id ? entry.id : ""))
     );
+    const thinkingCapabilityByModelId = buildThinkingCapabilityByModelId(modelEntries);
     const detectedModelIdsByLower = new Map(
       detectedModelIds.map((modelId) => [String(modelId).toLowerCase(), modelId])
     );
@@ -297,13 +299,17 @@ function createInteractiveApi(overrides = {}) {
     let thinkingModelModeHistory = normalizeThinkingModelModeHistory(existingThinkingModelModeHistory);
     let effectiveThinkingModelModes = resolveThinkingModelModes(
       existingThinkingModels,
-      existingThinkingModelModes
+      existingThinkingModelModes,
+      { thinkingCapabilityByModelId }
     );
 
     const initialNewThinkingModels = resolveThinkingModels(
       newlyAddedModels,
       [],
-      { hasSavedThinkingSelection: false }
+      {
+        hasSavedThinkingSelection: false,
+        thinkingCapabilityByModelId,
+      }
     );
     let newThinkingModels = [];
     if (newlyAddedModels.length) {
@@ -329,10 +335,12 @@ function createInteractiveApi(overrides = {}) {
       const newThinkingModelModes = await promptThinkingModelModes(
         menu,
         newThinkingModels,
-        initialNewThinkingModelModes
+        initialNewThinkingModelModes,
+        { thinkingCapabilityByModelId }
       );
       for (const [modelId, mode] of Object.entries(newThinkingModelModes)) {
-        const normalizedMode = normalizeThinkingMode(mode) || "medium";
+        const normalizedMode =
+          normalizeThinkingMode(mode) || initialNewThinkingModelModes[modelId] || "auto";
         if (normalizedMode === "none") {
           delete effectiveThinkingModelModes[modelId];
           continue;
@@ -365,7 +373,8 @@ function createInteractiveApi(overrides = {}) {
       const nextModeMap = await promptThinkingModelModes(
         menu,
         [modelId],
-        { [modelId]: initialMode }
+        { [modelId]: initialMode },
+        { thinkingCapabilityByModelId }
       );
       const nextMode = normalizeThinkingMode(nextModeMap[modelId]) || initialMode;
       if (nextMode === "none") {

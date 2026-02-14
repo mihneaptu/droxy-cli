@@ -81,7 +81,7 @@ Run `droxy status` to check if the proxy is running. Then open `droxy` to select
 droxy status --json
 ```
 
-Returns `status`, `host`, `port`, `pid`, `providersConnected`.
+Returns `status`, `host`, `port`, `pid`, `providersConnected`, `providersState`, `thinkingState`.
 
 ### Environment
 

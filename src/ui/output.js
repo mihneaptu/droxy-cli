@@ -83,6 +83,28 @@ function printInfo(message) {
   log(`${colorize(ICONS.info, COLORS.info)} ${safeMessage}`);
 }
 
+function printThinkingModeDowngrade({
+  modelId = "",
+  requestedMode = "",
+  fallbackMode = "auto",
+  reason = "",
+} = {}) {
+  const safeModelId = String(modelId || "").trim();
+  const safeRequestedMode = String(requestedMode || "").trim().toLowerCase();
+  const safeFallbackMode = String(fallbackMode || "").trim().toLowerCase() || "auto";
+  if (!safeModelId || !safeRequestedMode) return;
+
+  let detail = "because backend thinking capability could not be verified";
+  if (reason === "backend_unsupported") {
+    detail = "because backend reports this model does not support advanced thinking modes";
+  } else if (reason === "mode_not_allowed") {
+    detail = "because backend does not allow this mode for the model";
+  }
+  printWarning(
+    `Thinking mode '${safeRequestedMode}' for ${safeModelId} was downgraded to '${safeFallbackMode}' ${detail}.`
+  );
+}
+
 function printNextStep(message) {
   const safeMessage = String(message || "").trim();
   if (!safeMessage) return;
@@ -144,6 +166,7 @@ module.exports = {
   printTeachingError,
   printWarning,
   printInfo,
+  printThinkingModeDowngrade,
   printNextStep,
   printSmartSuggestion,
   printDivider,
