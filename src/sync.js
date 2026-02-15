@@ -619,50 +619,42 @@ function createSyncApi(overrides = {}) {
       }
     }
 
-    if (modelsTotal === 0) {
-      return {
-        state: "unknown",
-        reason: "no_models_selected",
-        modelsTotal,
-        modelsVerified,
-        modelsSupported,
-        modelsUnsupported,
-        modelsUnverified,
-      };
-    }
-
-    if (modelsVerified === modelsTotal) {
-      return {
-        state: "verified",
-        reason: "backend_reported_capabilities_for_all_models",
-        modelsTotal,
-        modelsVerified,
-        modelsSupported,
-        modelsUnsupported,
-        modelsUnverified,
-      };
-    }
-
-    if (modelsVerified > 0) {
-      return {
-        state: "unknown",
-        reason: "backend_reported_partial_capabilities",
-        modelsTotal,
-        modelsVerified,
-        modelsSupported,
-        modelsUnsupported,
-        modelsUnverified,
-      };
-    }
-
-    return {
-      state: "unknown",
-      reason: "backend_did_not_report_capabilities",
+    const summary = {
       modelsTotal,
       modelsVerified,
       modelsSupported,
       modelsUnsupported,
       modelsUnverified,
+    };
+
+    if (modelsTotal === 0) {
+      return {
+        ...summary,
+        state: "unknown",
+        reason: "no_models_selected",
+      };
+    }
+
+    if (modelsVerified === modelsTotal) {
+      return {
+        ...summary,
+        state: "verified",
+        reason: "backend_reported_capabilities_for_all_models",
+      };
+    }
+
+    if (modelsVerified > 0) {
+      return {
+        ...summary,
+        state: "unknown",
+        reason: "backend_reported_partial_capabilities",
+      };
+    }
+
+    return {
+      ...summary,
+      state: "unknown",
+      reason: "backend_did_not_report_capabilities",
     };
   }
 
@@ -806,51 +798,42 @@ function createSyncApi(overrides = {}) {
       thinkingModelModes,
       thinkingCapabilityByModelId
     );
-
-    for (const model of openAiExpandedModels) {
-      if (!model) continue;
-      const baseModelId = stripThinkingSuffix(model).toLowerCase();
-      const ownerProvider =
-        baseModelId &&
-        ownerProviderByModelId &&
-        typeof ownerProviderByModelId === "object"
-          ? String(ownerProviderByModelId[baseModelId] || "")
-          : "";
-      const nextEntry = {
-        model,
-        model_display_name: ensureDroxyPrefix(model),
-        base_url: `${base}/v1`,
-        api_key: apiKey,
+    const resolveOwnerProvider = (modelId) => {
+      const baseModelId = stripThinkingSuffix(modelId).toLowerCase();
+      if (!baseModelId) return "";
+      if (!ownerProviderByModelId || typeof ownerProviderByModelId !== "object") return "";
+      return String(ownerProviderByModelId[baseModelId] || "");
+    };
+    const modelGroups = [
+      {
+        models: openAiExpandedModels,
         provider: "openai",
-      };
-      if (ownerProvider) {
-        nextEntry.owned_by = ownerProvider;
-        nextEntry.meta = { owner: ownerProvider };
-      }
-      entries.push(nextEntry);
-    }
-
-    for (const model of anthropicExpandedModels) {
-      if (!model) continue;
-      const baseModelId = stripThinkingSuffix(model).toLowerCase();
-      const ownerProvider =
-        baseModelId &&
-        ownerProviderByModelId &&
-        typeof ownerProviderByModelId === "object"
-          ? String(ownerProviderByModelId[baseModelId] || "")
-          : "";
-      const nextEntry = {
-        model,
-        model_display_name: ensureDroxyPrefix(model),
-        base_url: base,
-        api_key: apiKey,
+        baseUrl: `${base}/v1`,
+      },
+      {
+        models: anthropicExpandedModels,
         provider: "anthropic",
-      };
-      if (ownerProvider) {
-        nextEntry.owned_by = ownerProvider;
-        nextEntry.meta = { owner: ownerProvider };
+        baseUrl: base,
+      },
+    ];
+
+    for (const group of modelGroups) {
+      for (const model of group.models) {
+        if (!model) continue;
+        const ownerProvider = resolveOwnerProvider(model);
+        const nextEntry = {
+          model,
+          model_display_name: ensureDroxyPrefix(model),
+          base_url: group.baseUrl,
+          api_key: apiKey,
+          provider: group.provider,
+        };
+        if (ownerProvider) {
+          nextEntry.owned_by = ownerProvider;
+          nextEntry.meta = { owner: ownerProvider };
+        }
+        entries.push(nextEntry);
       }
-      entries.push(nextEntry);
     }
 
     return entries;
@@ -2222,8 +2205,6 @@ function createSyncApi(overrides = {}) {
       (options && typeof options.protocol === "string" && options.protocol) ||
       configuredProtocol(configValues);
     let oauthExcludedError = null;
-    let authFilesExcludedError = null;
-    let authMetadataExcludedError = null;
     const combinedExcluded = new Set();
 
     try {
@@ -2258,7 +2239,6 @@ function createSyncApi(overrides = {}) {
         combinedExcluded.add(normalized);
       }
     } catch (err) {
-      authFilesExcludedError = err;
       if (!combinedExcluded.size) {
         warnManagementExclusionFetchFailure(
           oauthExcludedError
@@ -2281,12 +2261,8 @@ function createSyncApi(overrides = {}) {
         if (!normalized) continue;
         combinedExcluded.add(normalized);
       }
-    } catch (err) {
-      authMetadataExcludedError = err;
-    }
-    if (combinedExcluded.size) return Array.from(combinedExcluded);
-    if (oauthExcludedError || authFilesExcludedError || authMetadataExcludedError) return [];
-    return [];
+    } catch {}
+    return Array.from(combinedExcluded);
   }
 
   function requestJsonWithOptions(url, requestOptions = {}) {
@@ -2732,7 +2708,8 @@ function createSyncApi(overrides = {}) {
 
     let protocolResolution;
     let detectedEntries;
-    if (Array.isArray(detectedModelEntries)) {
+    const hasDetectedEntries = Array.isArray(detectedModelEntries);
+    if (hasDetectedEntries) {
       detectedEntries = detectedModelEntries;
       const resolvedProtocol = protocol || configuredProtocol(configValues);
       protocolResolution = {
@@ -2746,15 +2723,6 @@ function createSyncApi(overrides = {}) {
         preferredError: null,
         fallbackError: null,
       };
-
-      const providerStatus = await fetchProviderConnectionStatusSafe(configValues, {
-        state,
-        quiet: true,
-        protocol: protocolResolution.protocol,
-      });
-      if (!providerStatus || providerStatus.providersState !== "verified") {
-        return failSyncWhenProvidersUnverified(providerStatus);
-      }
     } else {
       protocolResolution = await resolveReachableProtocol(configValues, {
         probePath: "/v1/models",

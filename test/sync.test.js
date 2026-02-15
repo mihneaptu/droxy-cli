@@ -1738,6 +1738,61 @@ test("syncDroidSettings writes files from provided detected entries without netw
   }
 });
 
+test(
+  "syncDroidSettings allows explicit clear from provided detected entries when management status is unavailable",
+  async () => {
+    const cleanup = withTempFactoryDir();
+    try {
+      let updatedState = null;
+      const requestMock = createRouteRequestMock({}, 500);
+
+      const api = sync.createSyncApi({
+        config: {
+          DEFAULT_PORT: 8317,
+          configExists: () => true,
+          ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+          readConfigValues: () => ({
+            host: "127.0.0.1",
+            port: 8317,
+            tlsEnabled: false,
+            apiKey: "k",
+            managementKey: "",
+          }),
+          readState: () => ({ apiKey: "k", managementKey: "" }),
+          updateState: (patch) => {
+            updatedState = patch;
+            return patch;
+          },
+        },
+        http: requestMock,
+        https: requestMock,
+        output: {
+          printGuidedError: () => {},
+          printSuccess: () => {},
+          printWarning: () => {},
+        },
+      });
+
+      const result = await api.syncDroidSettings({
+        quiet: true,
+        selectedModels: [],
+        detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+        protocol: "http",
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(result.result && result.result.status, "cleared");
+      assert.deepEqual(result.result && result.result.selectedModels, []);
+      assert.deepEqual(updatedState && updatedState.selectedModels, []);
+      assert.deepEqual(updatedState && updatedState.thinkingModels, []);
+      assert.deepEqual(updatedState && updatedState.thinkingModelModes, {});
+      assert.deepEqual(updatedState && updatedState.factory && updatedState.factory.modelsByProvider, {});
+    } finally {
+      cleanup();
+    }
+  }
+);
+
 test("syncDroidSettings writes thinking suffix variants for selected thinking models", async () => {
   const cleanup = withTempFactoryDir();
   try {
