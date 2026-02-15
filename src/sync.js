@@ -162,7 +162,9 @@ const RESTRICTED_STATUS_VALUES = new Set([
   "unavailable",
 ]);
 const MANAGEMENT_AUTH_FILES_PATH = "/v0/management/auth-files";
+const MANAGEMENT_AUTH_FILES_DOWNLOAD_PATH = "/v0/management/auth-files/download";
 const MANAGEMENT_OAUTH_EXCLUDED_MODELS_PATH = "/v0/management/oauth-excluded-models";
+const MANAGEMENT_MODEL_DEFINITIONS_PATH_PREFIX = "/v0/management/model-definitions";
 const UNSUPPORTED_MODEL_HINTS = Object.freeze([
   "is not supported",
   "not supported",
@@ -174,6 +176,11 @@ const UNSUPPORTED_MODEL_HINTS = Object.freeze([
   "not allowed",
   "denied",
 ]);
+const AUTH_METADATA_EXCLUDED_MODEL_KEYS = Object.freeze([
+  "excluded_models",
+  "excluded-models",
+  "excludedModels",
+]);
 const PROVIDER_ID_ALIASES = Object.freeze({
   antigravity: ["antigravity"],
   claude: ["claude", "anthropic"],
@@ -182,6 +189,14 @@ const PROVIDER_ID_ALIASES = Object.freeze({
   iflow: ["iflow"],
   kimi: ["kimi", "moonshot"],
   qwen: ["qwen"],
+});
+const MODEL_DEFINITION_CHANNEL_BY_PROVIDER = Object.freeze({
+  antigravity: "antigravity",
+  claude: "claude",
+  codex: "codex",
+  gemini: "gemini",
+  iflow: "iflow",
+  qwen: "qwen",
 });
 
 function createSyncApi(overrides = {}) {
@@ -507,8 +522,7 @@ function createSyncApi(overrides = {}) {
       supportStateDirect !== null ? supportStateDirect : supportStateFromStatus;
     const modesFromSupportHint =
       modesHint === undefined &&
-      supportHint &&
-      typeof supportHint === "object"
+      supportHint !== undefined
         ? normalizeAllowedThinkingModes(supportHint, {
             includeAuto: false,
             includeNone: false,
@@ -538,13 +552,11 @@ function createSyncApi(overrides = {}) {
     }
 
     if (supportState === true) {
-      return normalizeThinkingCapability(
-        {
-          verified: true,
-          supported: true,
-        },
-        { thinkingModeValues: THINKING_MODE_VALUES }
-      );
+      return normalizeThinkingCapability({
+        verified: true,
+        supported: true,
+        allowedModes: DEFAULT_THINKING_ALLOWED_MODES.slice(),
+      });
     }
 
     return normalizeThinkingCapability({
@@ -567,13 +579,12 @@ function createSyncApi(overrides = {}) {
     }
 
     const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
-    if (!capability.verified) {
+    if (capability.verified !== true) {
       return { mode: "auto", downgraded: true, reason: "backend_unverified" };
     }
     if (capability.supported !== true) {
       return { mode: "auto", downgraded: true, reason: "backend_unsupported" };
     }
-
     const allowedModes = new Set(normalizeAllowedThinkingModes(capability.allowedModes));
     if (!allowedModes.has(normalizedMode)) {
       return { mode: "auto", downgraded: true, reason: "mode_not_allowed" };
@@ -584,6 +595,75 @@ function createSyncApi(overrides = {}) {
 
   function normalizeThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId = {}) {
     return resolveThinkingModeForModel(modelId, mode, thinkingCapabilityByModelId).mode;
+  }
+
+  function buildThinkingInterrogationSummary(modelIds, thinkingCapabilityByModelId = {}) {
+    const normalizedModelIds = normalizeSelectedModelIds(modelIds);
+    const modelsTotal = normalizedModelIds.length;
+    let modelsVerified = 0;
+    let modelsSupported = 0;
+    let modelsUnsupported = 0;
+    let modelsUnverified = 0;
+
+    for (const modelId of normalizedModelIds) {
+      const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
+      if (capability.verified === true) {
+        modelsVerified += 1;
+        if (capability.supported === true) {
+          modelsSupported += 1;
+        } else {
+          modelsUnsupported += 1;
+        }
+      } else {
+        modelsUnverified += 1;
+      }
+    }
+
+    if (modelsTotal === 0) {
+      return {
+        state: "unknown",
+        reason: "no_models_selected",
+        modelsTotal,
+        modelsVerified,
+        modelsSupported,
+        modelsUnsupported,
+        modelsUnverified,
+      };
+    }
+
+    if (modelsVerified === modelsTotal) {
+      return {
+        state: "verified",
+        reason: "backend_reported_capabilities_for_all_models",
+        modelsTotal,
+        modelsVerified,
+        modelsSupported,
+        modelsUnsupported,
+        modelsUnverified,
+      };
+    }
+
+    if (modelsVerified > 0) {
+      return {
+        state: "unknown",
+        reason: "backend_reported_partial_capabilities",
+        modelsTotal,
+        modelsVerified,
+        modelsSupported,
+        modelsUnsupported,
+        modelsUnverified,
+      };
+    }
+
+    return {
+      state: "unknown",
+      reason: "backend_did_not_report_capabilities",
+      modelsTotal,
+      modelsVerified,
+      modelsSupported,
+      modelsUnsupported,
+      modelsUnverified,
+    };
   }
 
   function appendThinkingVariant(baseModelId, mode, outputModels, thinkingCapabilityByModelId = {}) {
@@ -708,6 +788,7 @@ function createSyncApi(overrides = {}) {
     apiKey,
     openAiModels,
     anthropicModels,
+    ownerProviderByModelId = {},
     thinkingModelModes,
     thinkingCapabilityByModelId,
   }) {
@@ -728,27 +809,106 @@ function createSyncApi(overrides = {}) {
 
     for (const model of openAiExpandedModels) {
       if (!model) continue;
-      entries.push({
+      const baseModelId = stripThinkingSuffix(model).toLowerCase();
+      const ownerProvider =
+        baseModelId &&
+        ownerProviderByModelId &&
+        typeof ownerProviderByModelId === "object"
+          ? String(ownerProviderByModelId[baseModelId] || "")
+          : "";
+      const nextEntry = {
         model,
         model_display_name: ensureDroxyPrefix(model),
         base_url: `${base}/v1`,
         api_key: apiKey,
         provider: "openai",
-      });
+      };
+      if (ownerProvider) {
+        nextEntry.owned_by = ownerProvider;
+        nextEntry.meta = { owner: ownerProvider };
+      }
+      entries.push(nextEntry);
     }
 
     for (const model of anthropicExpandedModels) {
       if (!model) continue;
-      entries.push({
+      const baseModelId = stripThinkingSuffix(model).toLowerCase();
+      const ownerProvider =
+        baseModelId &&
+        ownerProviderByModelId &&
+        typeof ownerProviderByModelId === "object"
+          ? String(ownerProviderByModelId[baseModelId] || "")
+          : "";
+      const nextEntry = {
         model,
         model_display_name: ensureDroxyPrefix(model),
         base_url: base,
         api_key: apiKey,
         provider: "anthropic",
-      });
+      };
+      if (ownerProvider) {
+        nextEntry.owned_by = ownerProvider;
+        nextEntry.meta = { owner: ownerProvider };
+      }
+      entries.push(nextEntry);
     }
 
     return entries;
+  }
+
+  function buildOwnerProviderByModelId(modelsByProvider = {}) {
+    const output = {};
+    if (!modelsByProvider || typeof modelsByProvider !== "object") return output;
+    for (const [providerId, modelIds] of Object.entries(modelsByProvider)) {
+      const normalizedProviderId = String(providerId || "").trim().toLowerCase();
+      if (!normalizedProviderId) continue;
+      for (const modelId of normalizeSelectedModelIds(modelIds)) {
+        const baseModelId = stripThinkingSuffix(modelId).toLowerCase();
+        if (!baseModelId) continue;
+        output[baseModelId] = normalizedProviderId;
+      }
+    }
+    return output;
+  }
+
+  function resolveOwnerProviderHint(entry) {
+    if (!entry || typeof entry !== "object") return "";
+    const raw =
+      entry.owner ||
+      entry.owned_by ||
+      entry.organization ||
+      entry.org ||
+      (entry.meta && typeof entry.meta === "object" && (entry.meta.owner || entry.meta.owned_by)) ||
+      "";
+    const normalized = normalizeProviderOwnerTag(raw);
+    if (normalized) return normalized;
+    return String(raw || "").trim().toLowerCase();
+  }
+
+  function applyOwnerMetadataToFactoryEntry(targetEntry, sourceEntry) {
+    if (!targetEntry || typeof targetEntry !== "object") return;
+    const ownerProvider = resolveOwnerProviderHint(sourceEntry);
+    if (ownerProvider) {
+      targetEntry.owner = ownerProvider;
+      targetEntry.owned_by = ownerProvider;
+      const meta = targetEntry.meta && typeof targetEntry.meta === "object" ? { ...targetEntry.meta } : {};
+      meta.owner = ownerProvider;
+      targetEntry.meta = meta;
+      return;
+    }
+
+    delete targetEntry.owner;
+    delete targetEntry.owned_by;
+    if (targetEntry.meta && typeof targetEntry.meta === "object") {
+      const meta = { ...targetEntry.meta };
+      delete meta.owner;
+      delete meta.owned_by;
+      if (Object.keys(meta).length) {
+        targetEntry.meta = meta;
+      } else {
+        delete targetEntry.meta;
+      }
+    }
   }
 
   function updateFactorySettingsCustomModels({ host, port, entries }) {
@@ -804,6 +964,7 @@ function createSyncApi(overrides = {}) {
       next.baseUrl = normalizeUrl(entry.base_url);
       next.apiKey = entry.api_key;
       next.provider = entry.provider;
+      applyOwnerMetadataToFactoryEntry(next, entry);
       next.index = index;
       next.id = `custom:${entry.model}`;
       if (typeof next.noImageSupport !== "boolean") {
@@ -898,6 +1059,7 @@ function createSyncApi(overrides = {}) {
       next.base_url = normalizeUrl(entry.base_url);
       next.api_key = entry.api_key;
       next.provider = entry.provider;
+      applyOwnerMetadataToFactoryEntry(next, entry);
       if (entry.provider === "anthropic" && next.supports_images === undefined) {
         next.supports_images = true;
       }
@@ -1106,7 +1268,11 @@ function createSyncApi(overrides = {}) {
   function isOpenAiFamilyProvider(value) {
     const normalized = String(value || "").trim().toLowerCase();
     if (!normalized) return false;
-    return normalized.includes("openai") || normalized.includes("codex");
+    return (
+      normalized.includes("openai") ||
+      normalized.includes("codex") ||
+      normalized.includes("chatgpt")
+    );
   }
 
   function isLikelyModelId(value) {
@@ -1115,6 +1281,12 @@ function createSyncApi(overrides = {}) {
     if (normalized.length > 200) return false;
     if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(normalized)) return false;
     return /[A-Za-z]/.test(normalized);
+  }
+
+  function isSpecificModelToken(value) {
+    const normalized = normalizeModelId(value);
+    if (!isLikelyModelId(normalized)) return false;
+    return /[0-9._:/-]/.test(normalized);
   }
 
   function extractModelIdFromEntry(entry) {
@@ -1186,6 +1358,7 @@ function createSyncApi(overrides = {}) {
     const patterns = [
       /['"`]([A-Za-z0-9][A-Za-z0-9._:/-]*)['"`]\s+model\b/gi,
       /\bmodel\s+['"`]([A-Za-z0-9][A-Za-z0-9._:/-]*)['"`]/gi,
+      /\bmodel\s+([A-Za-z0-9][A-Za-z0-9._:/-]*)\b/gi,
     ];
     const texts = collectStatusMessageTexts(statusMessage);
     if (!texts.length) return [];
@@ -1199,6 +1372,7 @@ function createSyncApi(overrides = {}) {
         while ((match = pattern.exec(text)) !== null) {
           const id = normalizeModelId(match[1]);
           if (!isLikelyModelId(id)) continue;
+          if (pattern === patterns[2] && !isSpecificModelToken(id)) continue;
           ids.add(id);
         }
       }
@@ -1317,13 +1491,219 @@ function createSyncApi(overrides = {}) {
     for (const file of payload.files) {
       if (!file || typeof file !== "object") continue;
       const provider = file.provider || file.type || "";
-      if (!isOpenAiFamilyProvider(provider)) continue;
       const statusMessage = file.status_message || file.statusMessage || file.detail;
-      for (const modelId of parseUnsupportedModelIdsFromStatusMessage(statusMessage)) {
+      const parsedModelIds = parseUnsupportedModelIdsFromStatusMessage(statusMessage);
+      if (!parsedModelIds.length) continue;
+      const statusTexts = collectStatusMessageTexts(statusMessage)
+        .join(" ")
+        .toLowerCase();
+      const isOpenAiContext =
+        isOpenAiFamilyProvider(provider) ||
+        statusTexts.includes("openai") ||
+        statusTexts.includes("codex") ||
+        statusTexts.includes("chatgpt");
+      if (!isOpenAiContext) continue;
+      for (const modelId of parsedModelIds) {
         excluded.add(modelId);
       }
     }
     return Array.from(excluded);
+  }
+
+  function parseThinkingModeLevelsFromStatusMessage(statusMessage) {
+    const texts = collectStatusMessageTexts(statusMessage);
+    if (!texts.length) return [];
+
+    const modes = new Set();
+    const patterns = [
+      /\b(?:valid|supported|allowed)\s+levels?\s*:\s*([a-z0-9_,\s/-]+)/i,
+      /\blevels?\s*(?:are|is)\s*:\s*([a-z0-9_,\s/-]+)/i,
+    ];
+
+    for (const text of texts) {
+      for (const pattern of patterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(text);
+        if (!match || !match[1]) continue;
+        const rawModes = String(match[1]).replace(/\band\b/gi, ",");
+        const parsedModes = normalizeAllowedThinkingModes(rawModes, {
+          includeAuto: false,
+          includeNone: false,
+        });
+        for (const mode of parsedModes) {
+          modes.add(mode);
+        }
+      }
+    }
+
+    if (!modes.size) return [];
+    return normalizeAllowedThinkingModes(Array.from(modes), {
+      includeAuto: true,
+      includeNone: true,
+    });
+  }
+
+  function mergeThinkingModeSets(existingModes = [], incomingModes = []) {
+    const normalizedExisting = normalizeAllowedThinkingModes(existingModes, {
+      includeAuto: true,
+      includeNone: true,
+    });
+    const normalizedIncoming = normalizeAllowedThinkingModes(incomingModes, {
+      includeAuto: true,
+      includeNone: true,
+    });
+    if (!normalizedExisting.length) return normalizedIncoming;
+    if (!normalizedIncoming.length) return normalizedExisting;
+
+    const incomingSet = new Set(normalizedIncoming);
+    const intersection = normalizedExisting.filter((mode) => incomingSet.has(mode));
+    if (intersection.length > 0) {
+      return normalizeAllowedThinkingModes(intersection, {
+        includeAuto: true,
+        includeNone: true,
+      });
+    }
+
+    return normalizedExisting;
+  }
+
+  function parseAuthFilesThinkingCapabilityHints(payload) {
+    const byModelId = {};
+    const byProviderId = {};
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.files)) {
+      return { byModelId, byProviderId };
+    }
+
+    for (const file of payload.files) {
+      if (!file || typeof file !== "object") continue;
+      const statusMessage = file.status_message || file.statusMessage || file.detail;
+      const allowedModes = parseThinkingModeLevelsFromStatusMessage(statusMessage);
+      if (!allowedModes.length) continue;
+
+      const capability = normalizeThinkingCapability({
+        verified: true,
+        supported: true,
+        allowedModes,
+      });
+      const unsupportedModelIds = parseUnsupportedModelIdsFromStatusMessage(statusMessage);
+      if (unsupportedModelIds.length) {
+        for (const modelId of unsupportedModelIds) {
+          const normalizedModelId = stripThinkingSuffix(modelId).toLowerCase();
+          if (!normalizedModelId) continue;
+          byModelId[normalizedModelId] = capability;
+        }
+        continue;
+      }
+
+      const providerId = normalizeProviderIdStrict(file.provider || file.type || "");
+      if (!providerId) continue;
+      if (!Object.prototype.hasOwnProperty.call(byProviderId, providerId)) {
+        byProviderId[providerId] = capability;
+        continue;
+      }
+      byProviderId[providerId] = normalizeThinkingCapability({
+        verified: true,
+        supported: true,
+        allowedModes: mergeThinkingModeSets(byProviderId[providerId].allowedModes, capability.allowedModes),
+      });
+    }
+
+    return { byModelId, byProviderId };
+  }
+
+  function parseAuthMetadataExcludedModelIds(payload) {
+    if (!payload || typeof payload !== "object") return [];
+    const ids = new Set();
+    for (const key of AUTH_METADATA_EXCLUDED_MODEL_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+      collectModelIdsFromUnknown(payload[key], ids);
+    }
+    return Array.from(ids);
+  }
+
+  function modelDefinitionChannelForProviderId(providerId) {
+    const normalizedProviderId = normalizeProviderIdStrict(providerId);
+    if (!normalizedProviderId) return "";
+    return MODEL_DEFINITION_CHANNEL_BY_PROVIDER[normalizedProviderId] || "";
+  }
+
+  function parseModelDefinitionThinkingCapabilityHints(payload) {
+    const byModelId = {};
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.models)) {
+      return byModelId;
+    }
+    for (const item of payload.models) {
+      const entry = normalizeModelEntry(item);
+      if (!entry || !entry.id) continue;
+      const normalizedModelId = stripThinkingSuffix(entry.id).toLowerCase();
+      if (!normalizedModelId) continue;
+      const capability = normalizeThinkingCapability(entry.thinking);
+      if (capability.verified !== true) continue;
+      byModelId[normalizedModelId] = capability;
+    }
+    return byModelId;
+  }
+
+  function mergeThinkingCapabilityHints(base = {}, additions = {}) {
+    const next = {
+      byModelId:
+        base && base.byModelId && typeof base.byModelId === "object" ? { ...base.byModelId } : {},
+      byProviderId:
+        base && base.byProviderId && typeof base.byProviderId === "object"
+          ? { ...base.byProviderId }
+          : {},
+    };
+    const sourceByModelId =
+      additions && additions.byModelId && typeof additions.byModelId === "object"
+        ? additions.byModelId
+        : {};
+    const sourceByProviderId =
+      additions && additions.byProviderId && typeof additions.byProviderId === "object"
+        ? additions.byProviderId
+        : {};
+
+    for (const [modelId, capability] of Object.entries(sourceByModelId)) {
+      if (Object.prototype.hasOwnProperty.call(next.byModelId, modelId)) continue;
+      next.byModelId[modelId] = normalizeThinkingCapability(capability);
+    }
+    for (const [providerId, capability] of Object.entries(sourceByProviderId)) {
+      if (Object.prototype.hasOwnProperty.call(next.byProviderId, providerId)) continue;
+      next.byProviderId[providerId] = normalizeThinkingCapability(capability);
+    }
+    return next;
+  }
+
+  function applyThinkingCapabilityHintsToEntries(entries, hints = {}) {
+    const byModelId =
+      hints && hints.byModelId && typeof hints.byModelId === "object" ? hints.byModelId : {};
+    const byProviderId =
+      hints && hints.byProviderId && typeof hints.byProviderId === "object" ? hints.byProviderId : {};
+    const outputEntries = [];
+
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || typeof entry !== "object") continue;
+      const currentCapability = normalizeThinkingCapability(entry.thinking);
+      if (currentCapability.verified === true) {
+        outputEntries.push(entry);
+        continue;
+      }
+
+      const normalizedModelId = stripThinkingSuffix(entry.id).toLowerCase();
+      const providerId = normalizeProviderIdStrict(entry.provider || "");
+      const hint =
+        (normalizedModelId && byModelId[normalizedModelId]) || (providerId && byProviderId[providerId]);
+      if (!hint) {
+        outputEntries.push(entry);
+        continue;
+      }
+
+      outputEntries.push({
+        ...entry,
+        thinking: normalizeThinkingCapability(hint),
+      });
+    }
+
+    return outputEntries;
   }
 
   function normalizeProviderIdStrict(value) {
@@ -1520,6 +1900,144 @@ function createSyncApi(overrides = {}) {
     return parseAuthFilesModelExclusions(payload);
   }
 
+  async function fetchAuthFilesThinkingCapabilityHints({
+    configValues,
+    protocol,
+    managementKey,
+  }) {
+    const payload = await requestManagementJson({
+      configValues,
+      protocol,
+      suffix: MANAGEMENT_AUTH_FILES_PATH,
+      managementKey,
+    });
+    return parseAuthFilesThinkingCapabilityHints(payload);
+  }
+
+  async function fetchModelDefinitionThinkingCapabilityHints({
+    configValues,
+    protocol,
+    managementKey,
+    providerIds = [],
+  }) {
+    const byModelId = {};
+    const uniqueChannels = new Set();
+    for (const providerId of Array.isArray(providerIds) ? providerIds : []) {
+      const channel = modelDefinitionChannelForProviderId(providerId);
+      if (!channel) continue;
+      uniqueChannels.add(channel);
+    }
+    for (const channel of uniqueChannels) {
+      let payload = null;
+      try {
+        payload = await requestManagementJson({
+          configValues,
+          protocol,
+          suffix: `${MANAGEMENT_MODEL_DEFINITIONS_PATH_PREFIX}/${encodeURIComponent(channel)}`,
+          managementKey,
+        });
+      } catch {
+        payload = null;
+      }
+      const parsedByModelId = parseModelDefinitionThinkingCapabilityHints(payload);
+      for (const [modelId, capability] of Object.entries(parsedByModelId)) {
+        if (Object.prototype.hasOwnProperty.call(byModelId, modelId)) continue;
+        byModelId[modelId] = normalizeThinkingCapability(capability);
+      }
+    }
+    return { byModelId, byProviderId: {} };
+  }
+
+  async function fetchManagementThinkingCapabilityHints(configValues, options = {}) {
+    let state = {};
+    if (
+      Object.prototype.hasOwnProperty.call(options, "state") &&
+      options.state &&
+      typeof options.state === "object"
+    ) {
+      state = options.state;
+    } else if (config && typeof config.readState === "function") {
+      state = config.readState() || {};
+    }
+
+    const managementKey = resolveManagementKey(configValues, state, options);
+    if (!managementKey) return { byModelId: {}, byProviderId: {} };
+
+    const protocol =
+      (options && typeof options.protocol === "string" && options.protocol) ||
+      configuredProtocol(configValues);
+    const providerIds = Array.isArray(options.providerIds) ? options.providerIds : [];
+    let combinedHints = { byModelId: {}, byProviderId: {} };
+
+    try {
+      const authHints = await fetchAuthFilesThinkingCapabilityHints({
+        configValues,
+        protocol,
+        managementKey,
+      });
+      combinedHints = mergeThinkingCapabilityHints(combinedHints, authHints);
+    } catch {
+      // Ignore hint fetch failures; fallback logic remains safe.
+    }
+
+    try {
+      const staticHints = await fetchModelDefinitionThinkingCapabilityHints({
+        configValues,
+        protocol,
+        managementKey,
+        providerIds,
+      });
+      combinedHints = mergeThinkingCapabilityHints(combinedHints, staticHints);
+    } catch {
+      // Ignore static definition fetch failures; fallback logic remains safe.
+    }
+
+    return combinedHints;
+  }
+
+  async function fetchAuthFilesMetadataModelExclusions({
+    configValues,
+    protocol,
+    managementKey,
+  }) {
+    const payload = await requestManagementJson({
+      configValues,
+      protocol,
+      suffix: MANAGEMENT_AUTH_FILES_PATH,
+      managementKey,
+    });
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.files)) {
+      return [];
+    }
+
+    const excluded = new Set();
+    for (const file of payload.files) {
+      if (!file || typeof file !== "object") continue;
+      if (parseOptionalFlag(file.runtime_only || file.runtimeOnly)) continue;
+      const name = normalizeAuthFileName(file);
+      if (!name) continue;
+      let metadataPayload = null;
+      try {
+        metadataPayload = await requestManagementJson({
+          configValues,
+          protocol,
+          suffix: `${MANAGEMENT_AUTH_FILES_DOWNLOAD_PATH}?name=${encodeURIComponent(name)}`,
+          managementKey,
+        });
+      } catch {
+        metadataPayload = null;
+      }
+      const parsedModelIds = parseAuthMetadataExcludedModelIds(metadataPayload);
+      for (const modelId of parsedModelIds) {
+        const normalizedModelId = normalizeModelId(modelId);
+        if (!normalizedModelId) continue;
+        excluded.add(normalizedModelId);
+      }
+    }
+
+    return Array.from(excluded);
+  }
+
   async function fetchProviderConnectionStatus(configValues, options = {}) {
     let state = {};
     if (
@@ -1704,6 +2222,9 @@ function createSyncApi(overrides = {}) {
       (options && typeof options.protocol === "string" && options.protocol) ||
       configuredProtocol(configValues);
     let oauthExcludedError = null;
+    let authFilesExcludedError = null;
+    let authMetadataExcludedError = null;
+    const combinedExcluded = new Set();
 
     try {
       const oauthExcluded = await fetchOAuthExcludedModels({
@@ -1711,32 +2232,61 @@ function createSyncApi(overrides = {}) {
         protocol,
         managementKey,
       });
-      if (oauthExcluded.length) return oauthExcluded;
+      for (const modelId of oauthExcluded) {
+        const normalized = normalizeModelId(modelId);
+        if (!normalized) continue;
+        combinedExcluded.add(normalized);
+      }
     } catch (err) {
       oauthExcludedError = err;
       warnManagementExclusionFetchFailure(
-        `Could not read ${MANAGEMENT_OAUTH_EXCLUDED_MODELS_PATH}; falling back to ${MANAGEMENT_AUTH_FILES_PATH}.`,
+        `Could not read ${MANAGEMENT_OAUTH_EXCLUDED_MODELS_PATH}; attempting ${MANAGEMENT_AUTH_FILES_PATH} as fallback.`,
         err,
         options
       );
     }
 
     try {
-      return await fetchAuthFilesModelExclusions({
+      const authFilesExcluded = await fetchAuthFilesModelExclusions({
         configValues,
         protocol,
         managementKey,
       });
+      for (const modelId of authFilesExcluded) {
+        const normalized = normalizeModelId(modelId);
+        if (!normalized) continue;
+        combinedExcluded.add(normalized);
+      }
     } catch (err) {
-      warnManagementExclusionFetchFailure(
-        oauthExcludedError
-          ? `Could not read ${MANAGEMENT_AUTH_FILES_PATH} after fallback; continuing without management exclusions.`
-          : `Could not read ${MANAGEMENT_AUTH_FILES_PATH}; continuing without management exclusions.`,
-        err,
-        options
-      );
-      return [];
+      authFilesExcludedError = err;
+      if (!combinedExcluded.size) {
+        warnManagementExclusionFetchFailure(
+          oauthExcludedError
+            ? `Could not read ${MANAGEMENT_AUTH_FILES_PATH} after fallback; continuing without management exclusions.`
+            : `Could not read ${MANAGEMENT_AUTH_FILES_PATH}; continuing without management exclusions.`,
+          err,
+          options
+        );
+      }
     }
+
+    try {
+      const authMetadataExcluded = await fetchAuthFilesMetadataModelExclusions({
+        configValues,
+        protocol,
+        managementKey,
+      });
+      for (const modelId of authMetadataExcluded) {
+        const normalized = normalizeModelId(modelId);
+        if (!normalized) continue;
+        combinedExcluded.add(normalized);
+      }
+    } catch (err) {
+      authMetadataExcludedError = err;
+    }
+    if (combinedExcluded.size) return Array.from(combinedExcluded);
+    if (oauthExcludedError || authFilesExcludedError || authMetadataExcludedError) return [];
+    return [];
   }
 
   function requestJsonWithOptions(url, requestOptions = {}) {
@@ -2054,13 +2604,28 @@ function createSyncApi(overrides = {}) {
           const data = extractModelsPayload(json);
           const normalizedEntries = data.map(normalizeModelEntry).filter(Boolean);
           const eligibleEntries = filterEligibleModelEntries(normalizedEntries);
+          const providerIds = Array.from(
+            new Set(
+              eligibleEntries
+                .map((entry) => normalizeProviderIdStrict(entry && entry.provider))
+                .filter(Boolean)
+            )
+          );
+          const thinkingHints = await fetchManagementThinkingCapabilityHints(configValues, {
+            protocol,
+            state: options.state,
+            managementKey: options.managementKey,
+            quiet: options.quiet === true,
+            providerIds,
+          });
+          const hintedEntries = applyThinkingCapabilityHintsToEntries(eligibleEntries, thinkingHints);
           const excludedModelIds = await fetchManagementModelExclusions(configValues, {
             protocol,
             state: options.state,
             managementKey: options.managementKey,
             quiet: options.quiet === true,
           });
-          return filterExcludedModelEntries(eligibleEntries, excludedModelIds);
+          return filterExcludedModelEntries(hintedEntries, excludedModelIds);
         } catch (err) {
           lastError = err;
           if (isAuthError(err)) continue;
@@ -2134,6 +2699,36 @@ function createSyncApi(overrides = {}) {
     const configValues = config.readConfigValues();
     const state = config.readState() || {};
     const apiKey = configValues.apiKey || state.apiKey || "";
+    const resolveStrictProviderStatusFailure = (providerStatus) => {
+      const normalizedStatus =
+        providerStatus && providerStatus.providersState === "verified" ? "verified" : "unknown";
+      const providersConnectedRaw = Number(providerStatus && providerStatus.providersConnected);
+      const providersConnected =
+        Number.isFinite(providersConnectedRaw) && providersConnectedRaw >= 0
+          ? Math.floor(providersConnectedRaw)
+          : 0;
+      return {
+        status: "skipped",
+        reason: "providers_unverified",
+        providersState: normalizedStatus,
+        providersConnected,
+      };
+    };
+    const failSyncWhenProvidersUnverified = (providerStatus) => {
+      const result = resolveStrictProviderStatusFailure(providerStatus);
+      if (!quiet) {
+        output.printGuidedError({
+          what: "Droid sync blocked.",
+          why: "Provider connection state is not backend-verified yet.",
+          next: [
+            "Run: droxy status --verbose",
+            "Ensure management auth is configured and accepted by the proxy backend",
+            "Retry provider login: droxy login <provider>",
+          ],
+        });
+      }
+      return { success: false, reason: "providers_unverified", result };
+    };
 
     let protocolResolution;
     let detectedEntries;
@@ -2151,6 +2746,15 @@ function createSyncApi(overrides = {}) {
         preferredError: null,
         fallbackError: null,
       };
+
+      const providerStatus = await fetchProviderConnectionStatusSafe(configValues, {
+        state,
+        quiet: true,
+        protocol: protocolResolution.protocol,
+      });
+      if (!providerStatus || providerStatus.providersState !== "verified") {
+        return failSyncWhenProvidersUnverified(providerStatus);
+      }
     } else {
       protocolResolution = await resolveReachableProtocol(configValues, {
         probePath: "/v1/models",
@@ -2176,6 +2780,15 @@ function createSyncApi(overrides = {}) {
           });
         }
         return { success: false, reason: "proxy_unreachable", result };
+      }
+
+      const providerStatus = await fetchProviderConnectionStatusSafe(configValues, {
+        state,
+        quiet: true,
+        protocol: protocolResolution.protocol,
+      });
+      if (!providerStatus || providerStatus.providersState !== "verified") {
+        return failSyncWhenProvidersUnverified(providerStatus);
       }
 
       try {
@@ -2211,10 +2824,15 @@ function createSyncApi(overrides = {}) {
         protocol: protocolResolution.protocol,
         ...clearFactoryModels({ host: configValues.host, port: configValues.port }),
       };
+      const thinkingSummary = buildThinkingInterrogationSummary([], {});
       config.updateState({
         lastFactorySyncAt: new Date().toISOString(),
         selectedModels: [],
-        thinkingState: "unknown",
+        thinkingState: thinkingSummary.state,
+        thinkingStatus: {
+          ...thinkingSummary,
+          updatedAt: new Date().toISOString(),
+        },
         thinkingModels: [],
         thinkingModelModes: {},
         factory: {
@@ -2278,14 +2896,11 @@ function createSyncApi(overrides = {}) {
     const syncedModelIds = normalizeSelectedModelIds(
       detectedEntries.map((entry) => (entry && entry.id ? entry.id : ""))
     );
-    const thinkingState =
-      syncedModelIds.length > 0 &&
-      syncedModelIds.every(
-        (modelId) =>
-          resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId).verified === true
-      )
-        ? "verified"
-        : "unknown";
+    const thinkingSummary = buildThinkingInterrogationSummary(
+      syncedModelIds,
+      thinkingCapabilityByModelId
+    );
+    const thinkingState = thinkingSummary.state;
     const explicitThinkingModelModes = normalizeThinkingModelModes(state.thinkingModelModes || {});
     const fallbackThinkingModelSet = new Set(
       normalizeThinkingModelIds(state.thinkingModels || []).map((modelId) =>
@@ -2358,6 +2973,7 @@ function createSyncApi(overrides = {}) {
           apiKey,
           openAiModels: split.openai,
           anthropicModels: split.anthropic,
+          ownerProviderByModelId: buildOwnerProviderByModelId(split.byProvider),
           thinkingModelModes,
           thinkingCapabilityByModelId,
         }),
@@ -2372,6 +2988,10 @@ function createSyncApi(overrides = {}) {
           ? { selectedModels: syncedModelIds }
           : {}),
       thinkingState,
+      thinkingStatus: {
+        ...thinkingSummary,
+        updatedAt: new Date().toISOString(),
+      },
       thinkingModels: thinkingModelIds,
       thinkingModelModes,
       factory: {
@@ -2413,6 +3033,7 @@ function createSyncApi(overrides = {}) {
     fetchManagedAuthFiles,
     fetchManagedAuthFilesSafe,
     fetchManagementModelExclusions,
+    fetchManagementThinkingCapabilityHints,
     fetchProviderConnectionStatus,
     fetchProviderConnectionStatusSafe,
     filterEligibleModelEntries,
@@ -2422,8 +3043,12 @@ function createSyncApi(overrides = {}) {
     isDroxyManagedEntry,
     isModelEligible,
     parseAuthFilesModelExclusions,
+    parseAuthFilesThinkingCapabilityHints,
+    parseAuthMetadataExcludedModelIds,
     parseManagedAuthFiles,
     parseAuthFilesProviderConnections,
+    parseModelDefinitionThinkingCapabilityHints,
+    parseThinkingModeLevelsFromStatusMessage,
     parseUnsupportedModelIdsFromStatusMessage,
     normalizeSelectedModelIds,
     removeManagedAuthFile,
