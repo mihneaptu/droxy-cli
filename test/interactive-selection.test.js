@@ -84,7 +84,7 @@ test("readDroidSyncedModelsByProvider reads Droxy-managed models from Droid file
   }
 });
 
-test("readDroidSyncedModelsByProvider trusts explicit provider metadata over model-id family", () => {
+test("readDroidSyncedModelsByProvider falls back to model-id family when only transport provider metadata exists", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "droxy-interactive-selection-"));
   try {
     const settingsPath = path.join(tempDir, "settings.json");
@@ -118,8 +118,50 @@ test("readDroidSyncedModelsByProvider trusts explicit provider metadata over mod
       },
     });
 
-    assert.equal(counts.codex, 1);
-    assert.equal(counts.gemini || 0, 0);
+    assert.equal(counts.gemini, 1);
+    assert.equal(counts.codex || 0, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("readDroidSyncedModelsByProvider prefers explicit owner metadata over transport provider metadata", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "droxy-interactive-selection-"));
+  try {
+    const settingsPath = path.join(tempDir, "settings.json");
+
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          customModels: [
+            {
+              model: "gemini-2.5-flash",
+              provider: "openai",
+              owned_by: "gemini",
+              displayName: "Droxy • gemini-2.5-flash",
+              baseUrl: "http://127.0.0.1:8317/v1",
+            },
+          ],
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const counts = readDroidSyncedModelsByProvider({
+      config: {
+        readConfigValues: () => ({ host: "127.0.0.1", port: 8317 }),
+      },
+      sync: {
+        getDroidManagedPaths: () => [settingsPath],
+        isDroxyManagedEntry: () => true,
+      },
+    });
+
+    assert.equal(counts.gemini, 1);
+    assert.equal(counts.codex || 0, 0);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -384,7 +426,7 @@ test("promptThinkingModelModes exposes full thinking mode menu", async () => {
   ]);
 });
 
-test("promptThinkingModelModes limits unknown capability models to auto and none", async () => {
+test("promptThinkingModelModes shows only safe fallback modes when capability is unknown", async () => {
   const menuPayloads = [];
   await promptThinkingModelModes(
     {

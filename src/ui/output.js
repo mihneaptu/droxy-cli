@@ -97,6 +97,8 @@ function printThinkingModeDowngrade({
   let detail = "because backend thinking capability could not be verified";
   if (reason === "backend_unsupported") {
     detail = "because backend reports this model does not support advanced thinking modes";
+  } else if (reason === "backend_unverified") {
+    detail = "because backend thinking capability for this model is unverified";
   } else if (reason === "mode_not_allowed") {
     detail = "because backend does not allow this mode for the model";
   }

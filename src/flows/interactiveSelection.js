@@ -126,6 +126,12 @@ function normalizeEntryForProviderResolution(entry) {
   );
   if (!modelId) return null;
 
+  const ownerValue =
+    entry.owner ||
+    entry.owned_by ||
+    entry.organization ||
+    entry.org;
+
   return {
     id: modelId,
     provider:
@@ -138,6 +144,10 @@ function normalizeEntryForProviderResolution(entry) {
       entry.owned_by ||
       entry.organization ||
       entry.org,
+    owner: ownerValue,
+    owned_by: entry.owned_by,
+    organization: entry.organization,
+    org: entry.org,
     meta: entry.meta,
   };
 }
@@ -166,11 +176,34 @@ function readDroidSyncedModelIdsByProvider({ config, sync, fsApi = fs } = {}) {
       const normalizedEntry = normalizeEntryForProviderResolution(entry);
       if (!normalizedEntry) continue;
 
-      const providerId = resolveProviderForModelEntry(normalizedEntry);
-      if (!providerId) continue;
-
       const modelId = stripThinkingSuffix(normalizedEntry.id);
       if (!modelId) continue;
+      const ownerMetadata =
+        normalizedEntry.owner ||
+        normalizedEntry.owned_by ||
+        normalizedEntry.organization ||
+        normalizedEntry.org ||
+        (
+          normalizedEntry.meta &&
+          typeof normalizedEntry.meta === "object" &&
+          (
+            normalizedEntry.meta.owner ||
+            normalizedEntry.meta.owned_by ||
+            normalizedEntry.meta.organization ||
+            normalizedEntry.meta.org
+          )
+        ) ||
+        "";
+
+      let providerId = resolveProviderForModelEntry(normalizedEntry);
+      if (!ownerMetadata && (providerId === "codex" || providerId === "claude")) {
+        const providerFromFamily = resolveProviderIdFromModelFamily(modelId);
+        if (providerFromFamily) {
+          providerId = providerFromFamily;
+        }
+      }
+      if (!providerId) continue;
+
       const key = `${providerId}:${modelId}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -198,6 +231,18 @@ function readDroidSyncedModelsByProvider(options = {}) {
   return output;
 }
 
+function resolveProviderIdFromModelFamily(modelId) {
+  const family = resolveModelFamilyFromModelId(modelId);
+  if (family === "gpt") return "codex";
+  if (family === "claude") return "claude";
+  if (family === "gemini") return "gemini";
+  if (family === "qwen") return "qwen";
+  if (family === "kimi") return "kimi";
+  if (family === "iflow") return "iflow";
+  if (family === "tab") return "antigravity";
+  return "";
+}
+
 function isLikelyThinkingModelId(modelId) {
   const value = normalizeText(modelId).toLowerCase();
   if (!value) return false;
@@ -211,12 +256,18 @@ function getAllowedThinkingModesForModel(
 ) {
   const includeNone = options.includeNone !== false;
   const capability = resolveThinkingCapabilityForModel(modelId, thinkingCapabilityByModelId);
-  if (capability.verified !== true || capability.supported !== true) {
-    return includeNone ? ["auto", "none"] : ["auto"];
+  const fallbackModes = normalizeAllowedThinkingModes(DEFAULT_THINKING_ALLOWED_MODES, { includeNone });
+  if (capability.verified !== true) {
+    return fallbackModes.length ? fallbackModes : ["auto"];
+  }
+  if (capability.supported !== true) {
+    const unsupportedModes = normalizeAllowedThinkingModes(capability.allowedModes, { includeNone });
+    if (unsupportedModes.length) return unsupportedModes;
+    return fallbackModes.length ? fallbackModes : ["auto"];
   }
   const allowedModes = normalizeAllowedThinkingModes(capability.allowedModes, { includeNone });
   if (allowedModes.length) return allowedModes;
-  return includeNone ? ["auto", "none"] : ["auto"];
+  return fallbackModes.length ? fallbackModes : ["auto"];
 }
 
 function getDefaultThinkingModeForModel(modelId, thinkingCapabilityByModelId = {}) {
@@ -341,11 +392,17 @@ async function promptThinkingModeForModel(menu, modelId, initialMode = "medium",
       ? normalizedInitialMode
       : fallbackInitialMode;
   const initialIndex = Math.max(0, modeOptions.indexOf(resolvedInitialMode));
+  const hintPrefix =
+    options && typeof options === "object" && typeof options.hintPrefix === "string"
+      ? options.hintPrefix.trim()
+      : "";
   const selection = await menu.selectSingle({
     title: `Thinking mode • ${modelId}`,
     items: modeItems,
     initialIndex,
-    hint: "Use ↑/↓ and Enter. Press q to keep current mode.",
+    hint: hintPrefix
+      ? `${hintPrefix} Use ↑/↓ and Enter. Press q to keep current mode.`
+      : "Use ↑/↓ and Enter. Press q to keep current mode.",
   });
   if (!selection || selection.cancelled) return resolvedInitialMode;
   return modeOptions[selection.index] || resolvedInitialMode;

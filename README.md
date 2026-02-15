@@ -40,10 +40,26 @@ $ droxy status --json
   "config": "C:\\Users\\Home\\AppData\\Roaming\\Droxy CLI\\config.yaml",
   "pid": 31940,
   "uptime": "1h 52m",
-  "providers": 5,
-  "providersConnected": 5,
+  "providers": 1,
+  "providersConnected": 1,
   "providersState": "verified",
-  "thinkingState": "unknown"
+  "providerStatusById": {
+    "codex": {
+      "connected": true,
+      "connectionState": "connected",
+      "connectionCount": 2,
+      "verified": true
+    }
+  },
+  "strictReady": true,
+  "authFilesCount": 7,
+  "thinkingState": "unknown",
+  "thinkingReason": "backend_reported_partial_capabilities",
+  "thinkingModelsTotal": 5,
+  "thinkingModelsVerified": 3,
+  "thinkingModelsSupported": 2,
+  "thinkingModelsUnsupported": 1,
+  "thinkingModelsUnverified": 2
 }
 ```
 
@@ -101,6 +117,7 @@ droxy version
 Scripting tips:
 
 - Use `droxy status --json` for automation and monitoring.
+- Use `droxy status --check` for strict health checks (fails when provider state is not backend-verified).
 - `--with-models` is a legacy alias; model sync is already the default.
 - Use `--skip-models` when you want login without immediate model sync.
 
