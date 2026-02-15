@@ -642,6 +642,57 @@ test("fetchAvailableModelEntries keeps safe fallback thinking modes when backend
   });
 });
 
+test("fetchAvailableModelEntries refines coarse verified thinking support with management hints", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            {
+              id: "gemini-3-pro-preview",
+              provider: "google",
+              thinking: {
+                supported: true,
+              },
+            },
+          ],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "valid levels are low, high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
 test("fetchAvailableModelEntries applies auth-files thinking level hints from status messages", async () => {
   const api = sync.createSyncApi({
     http: createRouteRequestMock({
@@ -1250,6 +1301,86 @@ test("fetchAvailableModelEntries uses auth-file metadata excluded_models when ma
   );
 
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchAvailableModelEntries disambiguates metadata exclusions by auth index", async () => {
+  const requestedAuthIndexes = [];
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-4o-mini", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              auth_index: 0,
+              status_message: "",
+            },
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              auth_index: 1,
+              status_message: "",
+            },
+          ],
+        },
+      },
+      "/v0/management/auth-files/download": ({ url }) => {
+        const parsed = new URL(url);
+        const name = parsed.searchParams.get("name");
+        const authIndex = parsed.searchParams.get("auth_index");
+        if (name !== "openai-main.json" || authIndex === null) {
+          return { statusCode: 404, body: { error: "file not found" } };
+        }
+        requestedAuthIndexes.push(authIndex);
+        if (authIndex === "0") {
+          return {
+            statusCode: 200,
+            body: {
+              type: "openai",
+              excluded_models: ["gpt-5"],
+            },
+          };
+        }
+        if (authIndex === "1") {
+          return {
+            statusCode: 200,
+            body: {
+              type: "openai",
+              excluded_models: ["gpt-4o-mini"],
+            },
+          };
+        }
+        return { statusCode: 404, body: { error: "file not found" } };
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(requestedAuthIndexes.sort(), ["0", "1"]);
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5.3-codex-spark"]);
 });
 
 test("fetchAvailableModelEntries merges oauth and auth-files exclusions", async () => {

@@ -1656,6 +1656,25 @@ function createSyncApi(overrides = {}) {
     return next;
   }
 
+  function isCoarseVerifiedThinkingCapability(capability) {
+    const normalized = normalizeThinkingCapability(capability);
+    if (normalized.verified !== true || normalized.supported !== true) return false;
+    const allowedModes = normalizeAllowedThinkingModes(normalized.allowedModes, {
+      includeAuto: true,
+      includeNone: true,
+    });
+    const fallbackModes = normalizeAllowedThinkingModes(DEFAULT_THINKING_ALLOWED_MODES, {
+      includeAuto: true,
+      includeNone: true,
+    });
+    if (allowedModes.length !== fallbackModes.length) return false;
+    const fallbackModeSet = new Set(fallbackModes);
+    for (const mode of allowedModes) {
+      if (!fallbackModeSet.has(mode)) return false;
+    }
+    return true;
+  }
+
   function applyThinkingCapabilityHintsToEntries(entries, hints = {}) {
     const byModelId =
       hints && hints.byModelId && typeof hints.byModelId === "object" ? hints.byModelId : {};
@@ -1666,7 +1685,8 @@ function createSyncApi(overrides = {}) {
     for (const entry of Array.isArray(entries) ? entries : []) {
       if (!entry || typeof entry !== "object") continue;
       const currentCapability = normalizeThinkingCapability(entry.thinking);
-      if (currentCapability.verified === true) {
+      const shouldPreferHint = isCoarseVerifiedThinkingCapability(currentCapability);
+      if (currentCapability.verified === true && !shouldPreferHint) {
         outputEntries.push(entry);
         continue;
       }
@@ -1680,9 +1700,15 @@ function createSyncApi(overrides = {}) {
         continue;
       }
 
+      const hintedCapability = normalizeThinkingCapability(hint);
+      if (currentCapability.verified === true && shouldPreferHint && hintedCapability.verified !== true) {
+        outputEntries.push(entry);
+        continue;
+      }
+
       outputEntries.push({
         ...entry,
-        thinking: normalizeThinkingCapability(hint),
+        thinking: hintedCapability,
       });
     }
 
@@ -1999,12 +2025,19 @@ function createSyncApi(overrides = {}) {
       if (parseOptionalFlag(file.runtime_only || file.runtimeOnly)) continue;
       const name = normalizeAuthFileName(file);
       if (!name) continue;
+      const authIndex = parseIntegerOrNull(file.auth_index ?? file.authIndex ?? file.index);
+      const params = new URLSearchParams();
+      params.set("name", name);
+      if (authIndex !== null) {
+        params.set("auth_index", String(authIndex));
+        params.set("index", String(authIndex));
+      }
       let metadataPayload = null;
       try {
         metadataPayload = await requestManagementJson({
           configValues,
           protocol,
-          suffix: `${MANAGEMENT_AUTH_FILES_DOWNLOAD_PATH}?name=${encodeURIComponent(name)}`,
+          suffix: `${MANAGEMENT_AUTH_FILES_DOWNLOAD_PATH}?${params.toString()}`,
           managementKey,
         });
       } catch {
