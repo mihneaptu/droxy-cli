@@ -233,14 +233,16 @@ function readDroidSyncedModelsByProvider(options = {}) {
 
 function resolveProviderIdFromModelFamily(modelId) {
   const family = resolveModelFamilyFromModelId(modelId);
-  if (family === "gpt") return "codex";
-  if (family === "claude") return "claude";
-  if (family === "gemini") return "gemini";
-  if (family === "qwen") return "qwen";
-  if (family === "kimi") return "kimi";
-  if (family === "iflow") return "iflow";
-  if (family === "tab") return "antigravity";
-  return "";
+  const familyToProviderMap = {
+    gpt: "codex",
+    claude: "claude",
+    gemini: "gemini",
+    qwen: "qwen",
+    kimi: "kimi",
+    iflow: "iflow",
+    tab: "antigravity",
+  };
+  return familyToProviderMap[family] || "";
 }
 
 function isLikelyThinkingModelId(modelId) {

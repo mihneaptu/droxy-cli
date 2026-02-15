@@ -685,6 +685,92 @@ test("fetchAvailableModelEntries applies auth-files thinking level hints from st
   });
 });
 
+test("fetchAvailableModelEntries parses slash-delimited auth-files thinking levels", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [{ id: "gemini-3-pro-preview", provider: "google" }],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "level \"xhigh\" not supported, valid levels are low/high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries parses auth-files level hints without colon", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [{ id: "gemini-3-pro-preview", provider: "google" }],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "levels are low, high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
 test("fetchAvailableModelEntries applies management model-definition thinking hints when /v1/models is minimal", async () => {
   const api = sync.createSyncApi({
     http: createRouteRequestMock({

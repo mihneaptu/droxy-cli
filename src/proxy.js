@@ -101,6 +101,14 @@ function createProxyApi(overrides = {}) {
     };
   }
 
+  function parseNonNegativeIntegerOrNull(value) {
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue) && numberValue >= 0) {
+      return Math.floor(numberValue);
+    }
+    return null;
+  }
+
   function hasProviderAuth(providerId = "", providerStatusById = {}) {
     const provider = String(providerId || "").trim().toLowerCase();
     const byProvider = providerStatusById && typeof providerStatusById === "object"
@@ -419,31 +427,11 @@ function createProxyApi(overrides = {}) {
         ? "verified"
         : "unknown";
     const thinkingReason = String(thinkingStatus.reason || "").trim() || "";
-    const thinkingModelsTotalRaw = Number(thinkingStatus.modelsTotal);
-    const thinkingModelsVerifiedRaw = Number(thinkingStatus.modelsVerified);
-    const thinkingModelsSupportedRaw = Number(thinkingStatus.modelsSupported);
-    const thinkingModelsUnsupportedRaw = Number(thinkingStatus.modelsUnsupported);
-    const thinkingModelsUnverifiedRaw = Number(thinkingStatus.modelsUnverified);
-    const thinkingModelsTotal =
-      Number.isFinite(thinkingModelsTotalRaw) && thinkingModelsTotalRaw >= 0
-        ? Math.floor(thinkingModelsTotalRaw)
-        : null;
-    const thinkingModelsVerified =
-      Number.isFinite(thinkingModelsVerifiedRaw) && thinkingModelsVerifiedRaw >= 0
-        ? Math.floor(thinkingModelsVerifiedRaw)
-        : null;
-    const thinkingModelsSupported =
-      Number.isFinite(thinkingModelsSupportedRaw) && thinkingModelsSupportedRaw >= 0
-        ? Math.floor(thinkingModelsSupportedRaw)
-        : null;
-    const thinkingModelsUnsupported =
-      Number.isFinite(thinkingModelsUnsupportedRaw) && thinkingModelsUnsupportedRaw >= 0
-        ? Math.floor(thinkingModelsUnsupportedRaw)
-        : null;
-    const thinkingModelsUnverified =
-      Number.isFinite(thinkingModelsUnverifiedRaw) && thinkingModelsUnverifiedRaw >= 0
-        ? Math.floor(thinkingModelsUnverifiedRaw)
-        : null;
+    const thinkingModelsTotal = parseNonNegativeIntegerOrNull(thinkingStatus.modelsTotal);
+    const thinkingModelsVerified = parseNonNegativeIntegerOrNull(thinkingStatus.modelsVerified);
+    const thinkingModelsSupported = parseNonNegativeIntegerOrNull(thinkingStatus.modelsSupported);
+    const thinkingModelsUnsupported = parseNonNegativeIntegerOrNull(thinkingStatus.modelsUnsupported);
+    const thinkingModelsUnverified = parseNonNegativeIntegerOrNull(thinkingStatus.modelsUnverified);
 
     let uptime = null;
     if (status.running && state.startedAt) {

@@ -1499,8 +1499,8 @@ function createSyncApi(overrides = {}) {
 
     const modes = new Set();
     const patterns = [
-      /\b(?:valid|supported|allowed)\s+levels?\s*:\s*([a-z0-9_,\s/-]+)/i,
-      /\blevels?\s*(?:are|is)\s*:\s*([a-z0-9_,\s/-]+)/i,
+      /\b(?:valid|supported|allowed)\s+levels?\s*(?:are|is)?\s*:?\s*([a-z0-9_,\s/-]+)/i,
+      /\blevels?\s*(?:are|is)\s*:?\s*([a-z0-9_,\s/-]+)/i,
     ];
 
     for (const text of texts) {
@@ -1508,7 +1508,7 @@ function createSyncApi(overrides = {}) {
         pattern.lastIndex = 0;
         const match = pattern.exec(text);
         if (!match || !match[1]) continue;
-        const rawModes = String(match[1]).replace(/\band\b/gi, ",");
+        const rawModes = String(match[1]).replace(/[\/]/g, ",").replace(/\band\b/gi, ",");
         const parsedModes = normalizeAllowedThinkingModes(rawModes, {
           includeAuto: false,
           includeNone: false,
