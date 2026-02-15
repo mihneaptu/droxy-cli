@@ -9,3 +9,5 @@ vendor/*.bin
 *.log
 .factory-plugin/
 droxy-state.json
+temp_script.py
+vendor/CLIProxyAPIPlus/

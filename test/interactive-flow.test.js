@@ -694,6 +694,82 @@ test("provider model picker prefers Droid-derived defaults over persisted provid
   assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gpt-5"]);
 });
 
+test("provider model picker falls back to persisted provider cache when Droid defaults do not match provider models", async () => {
+  const selectSingleCalls = [];
+  const selectMultipleCalls = [];
+  let state = {
+    factory: {
+      modelsByProvider: {
+        gemini: ["gemini-3-pro-preview"],
+      },
+    },
+  };
+  const singleSelections = [{ index: 2 }, { index: 0 }];
+
+  const interactive = createInteractiveApi({
+    config: {
+      ensureConfig: () => {},
+      readConfigValues: () => ({
+        apiKey: "k",
+        authDir: "~/.cli-proxy-api",
+        host: "127.0.0.1",
+        port: 8317,
+        tlsEnabled: false,
+      }),
+      readState: () => state,
+      updateState: (partial) => {
+        state = { ...state, ...partial };
+        return state;
+      },
+    },
+    createSpinner: createSpinnerStub,
+    isInteractiveSession: () => true,
+    login: {
+      PROVIDERS: [{ id: "gemini", label: "Gemini (Google)" }],
+      getProvidersWithConnectionStatus: () => [
+        { id: "gemini", label: "Gemini (Google)", connected: true },
+      ],
+      loginFlow: async () => ({ success: true }),
+      resolveProvider: () => null,
+    },
+    menu: {
+      selectMultiple: async (payload) => {
+        selectMultipleCalls.push(payload);
+        return { cancelled: false, selected: payload.initialSelected.slice() };
+      },
+      selectSingle: async (payload) => {
+        selectSingleCalls.push(payload);
+        const next = singleSelections.shift() || { index: payload.items.length - 1 };
+        return { cancelled: false, value: "", ...next };
+      },
+    },
+    output: createOutputStub([]),
+    proxy: {
+      getProxyStatus: async () => ({ blocked: false, running: true }),
+      startProxy: async () => ({ running: true }),
+      statusProxy: async () => ({ status: "running" }),
+      stopProxy: async () => true,
+    },
+    sync: {
+      buildProtocolUnavailableError: () => new Error("unreachable"),
+      fetchAvailableModelEntries: async () => [
+        { id: "gemini-3-pro-preview", provider: "google" },
+      ],
+      resolveReachableProtocol: async () => ({ protocol: "http", reachable: true }),
+      syncDroidSettings: async () => ({ success: true, result: { modelsAdded: 1 } }),
+    },
+    // Simulates Droid file metadata using transport provider instead of canonical owner provider.
+    readDroidSyncedModelIdsByProvider: () => ({ codex: ["gemini-3-pro-preview"] }),
+  });
+
+  await interactive.runInteractiveHome();
+
+  assert.equal(selectSingleCalls.length >= 2, true);
+  assert.match(selectSingleCalls[1].items[0], /1 synced/);
+  assert.equal(selectMultipleCalls.length >= 1, true);
+  assert.deepEqual(selectMultipleCalls[0].initialSelected, ["gemini-3-pro-preview"]);
+});
+
 test("provider model picker prefers Droid-synced defaults over stale local selection", async () => {
   const selectSingleCalls = [];
   const selectMultipleCalls = [];

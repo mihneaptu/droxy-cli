@@ -80,6 +80,20 @@ function createRouteRequestMock(routes = {}, defaultStatusCode = 404) {
   };
 }
 
+function createVerifiedManagementRequestMock() {
+  return createRouteRequestMock(
+    {
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [{ provider: "openai", connected: true }],
+        },
+      },
+    },
+    500
+  );
+}
+
 test("updateFactorySettingsCustomModels preserves non-Droxy entries", () => {
   const cleanup = withTempFactoryDir();
   try {
@@ -194,6 +208,74 @@ test("updateFactoryConfigCustomModels preserves non-Droxy entries and creates ba
     assert.equal(models.includes("old-droxy"), false);
     assert.equal(models.includes("claude-opus"), true);
     assert.equal(fs.existsSync(backupPath), true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("updateFactorySettingsCustomModels persists owner metadata for Droxy-managed entries", () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    const settingsPath = path.join(process.env.DROXY_FACTORY_DIR, "settings.json");
+    fs.mkdirSync(process.env.DROXY_FACTORY_DIR, { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify({}, null, 2), "utf8");
+
+    sync.updateFactorySettingsCustomModels({
+      host: "127.0.0.1",
+      port: 8317,
+      entries: [
+        {
+          model: "gpt-oss-120b",
+          model_display_name: "Droxy • gpt-oss-120b",
+          base_url: "http://127.0.0.1:8317/v1",
+          api_key: "new",
+          provider: "openai",
+          owned_by: "antigravity",
+          meta: { owner: "antigravity" },
+        },
+      ],
+    });
+
+    const root = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const entry = (root.customModels || []).find((item) => item.model === "gpt-oss-120b");
+    assert.equal(Boolean(entry), true);
+    assert.equal(entry.owner, "antigravity");
+    assert.equal(entry.owned_by, "antigravity");
+    assert.equal(entry.meta && entry.meta.owner, "antigravity");
+  } finally {
+    cleanup();
+  }
+});
+
+test("updateFactoryConfigCustomModels persists owner metadata for Droxy-managed entries", () => {
+  const cleanup = withTempFactoryDir();
+  try {
+    const configPath = path.join(process.env.DROXY_FACTORY_DIR, "config.json");
+    fs.mkdirSync(process.env.DROXY_FACTORY_DIR, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({}, null, 2), "utf8");
+
+    sync.updateFactoryConfigCustomModels({
+      host: "127.0.0.1",
+      port: 8317,
+      entries: [
+        {
+          model: "gpt-oss-120b",
+          model_display_name: "Droxy • gpt-oss-120b",
+          base_url: "http://127.0.0.1:8317/v1",
+          api_key: "new",
+          provider: "openai",
+          owned_by: "antigravity",
+          meta: { owner: "antigravity" },
+        },
+      ],
+    });
+
+    const root = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const entry = (root.custom_models || []).find((item) => item.model === "gpt-oss-120b");
+    assert.equal(Boolean(entry), true);
+    assert.equal(entry.owner, "antigravity");
+    assert.equal(entry.owned_by, "antigravity");
+    assert.equal(entry.meta && entry.meta.owner, "antigravity");
   } finally {
     cleanup();
   }
@@ -503,6 +585,290 @@ test("fetchAvailableModelEntries preserves direct mode maps under thinking suppo
     supported: true,
     verified: true,
     allowedModes: ["auto", "medium", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries accepts direct thinking mode arrays", async () => {
+  const api = sync.createSyncApi({
+    http: createRequestMock({
+      data: [
+        {
+          id: "gpt-5",
+          provider: "openai",
+          thinking: ["medium", "high"],
+        },
+      ],
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    { protocolResolution: { reachable: true, protocol: "http" }, state: {} }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "medium", "high", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries keeps safe fallback thinking modes when backend only reports support", async () => {
+  const api = sync.createSyncApi({
+    http: createRequestMock({
+      data: [
+        {
+          id: "gemini-3-pro-preview",
+          provider: "gemini",
+          thinking: {
+            supported: true,
+          },
+        },
+      ],
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    { protocolResolution: { reachable: true, protocol: "http" }, state: {} }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries refines coarse verified thinking support with management hints", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            {
+              id: "gemini-3-pro-preview",
+              provider: "google",
+              thinking: {
+                supported: true,
+              },
+            },
+          ],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "valid levels are low, high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries applies auth-files thinking level hints from status messages", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [{ id: "gemini-3-pro-preview", provider: "google" }],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "level \"xhigh\" not supported, valid levels: low, high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries parses slash-delimited auth-files thinking levels", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [{ id: "gemini-3-pro-preview", provider: "google" }],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "level \"xhigh\" not supported, valid levels are low/high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries parses auth-files level hints without colon", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [{ id: "gemini-3-pro-preview", provider: "google" }],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "gemini",
+              status_message: "levels are low, high",
+            },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
+  });
+});
+
+test("fetchAvailableModelEntries applies management model-definition thinking hints when /v1/models is minimal", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [{ id: "gemini-3-pro-preview", owned_by: "google" }],
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: { files: [] },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+      "/v0/management/model-definitions/gemini": {
+        statusCode: 200,
+        body: {
+          channel: "gemini",
+          models: [
+            {
+              id: "gemini-3-pro-preview",
+              thinking: {
+                levels: ["low", "high"],
+              },
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gemini-3-pro-preview"]);
+  assert.deepEqual(entries[0].thinking, {
+    supported: true,
+    verified: true,
+    allowedModes: ["auto", "low", "high", "none"],
   });
 });
 
@@ -837,6 +1203,231 @@ test("fetchAvailableModelEntries excludes auth-files model IDs when status paylo
   );
 
   assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchAvailableModelEntries excludes unquoted auth-files model IDs when oauth-excluded-models is empty", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "codex",
+              status_message:
+                "The model gpt-5.3-codex-spark is not supported when using Codex with a ChatGPT account.",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchAvailableModelEntries uses auth-file metadata excluded_models when management exclusions are empty", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              status_message: "",
+            },
+          ],
+        },
+      },
+      "/v0/management/auth-files/download": ({ url }) => {
+        const parsed = new URL(url);
+        const name = parsed.searchParams.get("name");
+        if (name !== "openai-main.json") {
+          return { statusCode: 404, body: { error: "file not found" } };
+        }
+        return {
+          statusCode: 200,
+          body: {
+            type: "openai",
+            excluded_models: ["gpt-5.3-codex-spark"],
+          },
+        };
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5"]);
+});
+
+test("fetchAvailableModelEntries disambiguates metadata exclusions by auth index", async () => {
+  const requestedAuthIndexes = [];
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-4o-mini", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: { "oauth-excluded-models": null },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              auth_index: 0,
+              status_message: "",
+            },
+            {
+              provider: "openai",
+              name: "openai-main.json",
+              auth_index: 1,
+              status_message: "",
+            },
+          ],
+        },
+      },
+      "/v0/management/auth-files/download": ({ url }) => {
+        const parsed = new URL(url);
+        const name = parsed.searchParams.get("name");
+        const authIndex = parsed.searchParams.get("auth_index");
+        if (name !== "openai-main.json" || authIndex === null) {
+          return { statusCode: 404, body: { error: "file not found" } };
+        }
+        requestedAuthIndexes.push(authIndex);
+        if (authIndex === "0") {
+          return {
+            statusCode: 200,
+            body: {
+              type: "openai",
+              excluded_models: ["gpt-5"],
+            },
+          };
+        }
+        if (authIndex === "1") {
+          return {
+            statusCode: 200,
+            body: {
+              type: "openai",
+              excluded_models: ["gpt-4o-mini"],
+            },
+          };
+        }
+        return { statusCode: 404, body: { error: "file not found" } };
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(requestedAuthIndexes.sort(), ["0", "1"]);
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-5.3-codex-spark"]);
+});
+
+test("fetchAvailableModelEntries merges oauth and auth-files exclusions", async () => {
+  const api = sync.createSyncApi({
+    http: createRouteRequestMock({
+      "/v1/models": {
+        statusCode: 200,
+        body: {
+          data: [
+            { id: "gpt-5", provider: "openai" },
+            { id: "gpt-5.3-codex-spark", provider: "openai" },
+            { id: "gpt-4o-mini", provider: "openai" },
+          ],
+        },
+      },
+      "/v0/management/oauth-excluded-models": {
+        statusCode: 200,
+        body: {
+          "oauth-excluded-models": {
+            codex: ["gpt-5"],
+          },
+        },
+      },
+      "/v0/management/auth-files": {
+        statusCode: 200,
+        body: {
+          files: [
+            {
+              provider: "chatgpt",
+              status_message:
+                "The model gpt-5.3-codex-spark is not supported when using Codex with a ChatGPT account.",
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  const entries = await api.fetchAvailableModelEntries(
+    { host: "127.0.0.1", port: 8317, tlsEnabled: false, apiKey: "" },
+    {
+      protocolResolution: { reachable: true, protocol: "http" },
+      state: { managementKey: "mgmt-secret" },
+    }
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.id), ["gpt-4o-mini"]);
 });
 
 test("fetchAvailableModelEntries excludes slash-delimited auth-files model IDs when oauth-excluded-models errors", async () => {
@@ -1184,9 +1775,9 @@ test("syncDroidSettings treats empty /v1/models body as detect failure, not sele
         port: 8317,
         tlsEnabled: false,
         apiKey: "k",
-        managementKey: "",
+        managementKey: "mgmt",
       }),
-      readState: () => ({ apiKey: "k", managementKey: "" }),
+      readState: () => ({ apiKey: "k", managementKey: "mgmt" }),
       updateState: () => {
         throw new Error("updateState should not run on detect_failed");
       },
@@ -1210,6 +1801,16 @@ test("syncDroidSettings treats empty /v1/models body as detect failure, not sele
               res.statusCode = 200;
               callback(res);
               res.emit("data", "");
+              res.emit("end");
+              return;
+            }
+            if (pathname === "/v0/management/auth-files") {
+              res.statusCode = 200;
+              callback(res);
+              res.emit(
+                "data",
+                JSON.stringify({ files: [{ provider: "openai", connected: true }] })
+              );
               res.emit("end");
               return;
             }
@@ -1302,9 +1903,7 @@ test("syncDroidSettings writes files from provided detected entries without netw
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1316,15 +1915,16 @@ test("syncDroidSettings writes files from provided detected entries without netw
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
-        readState: () => ({ apiKey: "k" }),
+        readState: () => ({ apiKey: "k", managementKey: "mgmt" }),
         updateState: (patch) => {
           updatedState = patch;
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1355,13 +1955,66 @@ test("syncDroidSettings writes files from provided detected entries without netw
   }
 });
 
+test(
+  "syncDroidSettings allows explicit clear from provided detected entries when management status is unavailable",
+  async () => {
+    const cleanup = withTempFactoryDir();
+    try {
+      let updatedState = null;
+      const requestMock = createRouteRequestMock({}, 500);
+
+      const api = sync.createSyncApi({
+        config: {
+          DEFAULT_PORT: 8317,
+          configExists: () => true,
+          ensureDir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
+          readConfigValues: () => ({
+            host: "127.0.0.1",
+            port: 8317,
+            tlsEnabled: false,
+            apiKey: "k",
+            managementKey: "",
+          }),
+          readState: () => ({ apiKey: "k", managementKey: "" }),
+          updateState: (patch) => {
+            updatedState = patch;
+            return patch;
+          },
+        },
+        http: requestMock,
+        https: requestMock,
+        output: {
+          printGuidedError: () => {},
+          printSuccess: () => {},
+          printWarning: () => {},
+        },
+      });
+
+      const result = await api.syncDroidSettings({
+        quiet: true,
+        selectedModels: [],
+        detectedEntries: [{ id: "gpt-5", provider: "openai" }],
+        protocol: "http",
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(result.result && result.result.status, "cleared");
+      assert.deepEqual(result.result && result.result.selectedModels, []);
+      assert.deepEqual(updatedState && updatedState.selectedModels, []);
+      assert.deepEqual(updatedState && updatedState.thinkingModels, []);
+      assert.deepEqual(updatedState && updatedState.thinkingModelModes, {});
+      assert.deepEqual(updatedState && updatedState.factory && updatedState.factory.modelsByProvider, {});
+    } finally {
+      cleanup();
+    }
+  }
+);
+
 test("syncDroidSettings writes thinking suffix variants for selected thinking models", async () => {
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1373,15 +2026,16 @@ test("syncDroidSettings writes thinking suffix variants for selected thinking mo
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
-        readState: () => ({ apiKey: "k", thinkingModels: ["gpt-5"] }),
+        readState: () => ({ apiKey: "k", managementKey: "mgmt", thinkingModels: ["gpt-5"] }),
         updateState: (patch) => {
           updatedState = patch;
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1429,6 +2083,14 @@ test("syncDroidSettings writes thinking suffix variants for selected thinking mo
     assert.deepEqual(updatedState && updatedState.thinkingModels, ["gpt-5"]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "gpt-5": "medium" });
     assert.equal(updatedState && updatedState.thinkingState, "unknown");
+    assert.equal(
+      updatedState && updatedState.thinkingStatus && updatedState.thinkingStatus.reason,
+      "backend_reported_partial_capabilities"
+    );
+    assert.equal(
+      updatedState && updatedState.thinkingStatus && updatedState.thinkingStatus.modelsTotal,
+      2
+    );
   } finally {
     cleanup();
   }
@@ -1438,9 +2100,7 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1452,9 +2112,11 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
         readState: () => ({
           apiKey: "k",
+          managementKey: "mgmt",
           thinkingModels: ["gpt-5"],
           thinkingModelModes: { "gpt-5": "high" },
         }),
@@ -1463,8 +2125,8 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1503,6 +2165,14 @@ test("syncDroidSettings uses explicit thinking mode per selected model", async (
     ]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "gpt-5": "high" });
     assert.equal(updatedState && updatedState.thinkingState, "verified");
+    assert.equal(
+      updatedState && updatedState.thinkingStatus && updatedState.thinkingStatus.reason,
+      "backend_reported_capabilities_for_all_models"
+    );
+    assert.equal(
+      updatedState && updatedState.thinkingStatus && updatedState.thinkingStatus.modelsVerified,
+      1
+    );
   } finally {
     cleanup();
   }
@@ -1512,9 +2182,7 @@ test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1526,9 +2194,11 @@ test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
         readState: () => ({
           apiKey: "k",
+          managementKey: "mgmt",
           thinkingModels: ["openai/gpt-5"],
           thinkingModelModes: { "openai/gpt-5": "high" },
         }),
@@ -1537,8 +2207,8 @@ test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1584,13 +2254,11 @@ test("syncDroidSettings keeps explicit advanced thinking mode for namespaced gpt
   }
 });
 
-test("syncDroidSettings downgrades unverified advanced thinking modes to auto", async () => {
+test("syncDroidSettings downgrades explicit advanced thinking modes when backend capability is unverified", async () => {
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1602,9 +2270,11 @@ test("syncDroidSettings downgrades unverified advanced thinking modes to auto", 
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
         readState: () => ({
           apiKey: "k",
+          managementKey: "mgmt",
           thinkingModels: ["claude-opus"],
           thinkingModelModes: { "claude-opus": "xhigh" },
         }),
@@ -1613,8 +2283,8 @@ test("syncDroidSettings downgrades unverified advanced thinking modes to auto", 
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1644,6 +2314,14 @@ test("syncDroidSettings downgrades unverified advanced thinking modes to auto", 
     assert.deepEqual(updatedState && updatedState.thinkingModels, ["claude-opus"]);
     assert.deepEqual(updatedState && updatedState.thinkingModelModes, { "claude-opus": "auto" });
     assert.equal(updatedState && updatedState.thinkingState, "unknown");
+    assert.equal(
+      updatedState && updatedState.thinkingStatus && updatedState.thinkingStatus.reason,
+      "backend_did_not_report_capabilities"
+    );
+    assert.equal(
+      updatedState && updatedState.thinkingStatus && updatedState.thinkingStatus.modelsUnverified,
+      1
+    );
   } finally {
     cleanup();
   }
@@ -1653,6 +2331,7 @@ test("syncDroidSettings emits a thinking downgrade warning when backend capabili
   const cleanup = withTempFactoryDir();
   try {
     const downgradeWarnings = [];
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
     const api = sync.createSyncApi({
       config: {
         DEFAULT_PORT: 8317,
@@ -1663,14 +2342,18 @@ test("syncDroidSettings emits a thinking downgrade warning when backend capabili
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
         readState: () => ({
           apiKey: "k",
+          managementKey: "mgmt",
           thinkingModels: ["gpt-5"],
           thinkingModelModes: { "gpt-5": "high" },
         }),
         updateState: (patch) => patch,
       },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1688,12 +2371,10 @@ test("syncDroidSettings emits a thinking downgrade warning when backend capabili
 
     assert.equal(result.success, true);
     assert.equal(downgradeWarnings.length, 1);
-    assert.deepEqual(downgradeWarnings[0], {
-      modelId: "gpt-5",
-      requestedMode: "high",
-      fallbackMode: "auto",
-      reason: "backend_unverified",
-    });
+    assert.equal(downgradeWarnings[0].modelId, "gpt-5");
+    assert.equal(downgradeWarnings[0].requestedMode, "high");
+    assert.equal(downgradeWarnings[0].fallbackMode, "auto");
+    assert.equal(downgradeWarnings[0].reason, "backend_unverified");
   } finally {
     cleanup();
   }
@@ -1703,9 +2384,7 @@ test("syncDroidSettings prunes stale selected IDs when only partial matches are 
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1717,15 +2396,16 @@ test("syncDroidSettings prunes stale selected IDs when only partial matches are 
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
-        readState: () => ({ apiKey: "k" }),
+        readState: () => ({ apiKey: "k", managementKey: "mgmt" }),
         updateState: (patch) => {
           updatedState = patch;
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1753,9 +2433,7 @@ test("syncDroidSettings clears stale selection when none of the selected models 
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1767,15 +2445,16 @@ test("syncDroidSettings clears stale selection when none of the selected models 
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
-        readState: () => ({ apiKey: "k" }),
+        readState: () => ({ apiKey: "k", managementKey: "mgmt" }),
         updateState: (patch) => {
           updatedState = patch;
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},
@@ -1808,9 +2487,7 @@ test("syncDroidSettings clears Droid models when selection is explicitly empty",
   const cleanup = withTempFactoryDir();
   try {
     let updatedState = null;
-    const failRequest = () => {
-      throw new Error("network should not be used");
-    };
+    const verifiedManagementRequest = createVerifiedManagementRequestMock();
 
     const api = sync.createSyncApi({
       config: {
@@ -1822,15 +2499,16 @@ test("syncDroidSettings clears Droid models when selection is explicitly empty",
           port: 8317,
           tlsEnabled: false,
           apiKey: "k",
+          managementKey: "mgmt",
         }),
-        readState: () => ({ apiKey: "k" }),
+        readState: () => ({ apiKey: "k", managementKey: "mgmt" }),
         updateState: (patch) => {
           updatedState = patch;
           return patch;
         },
       },
-      http: { request: failRequest },
-      https: { request: failRequest },
+      http: verifiedManagementRequest,
+      https: verifiedManagementRequest,
       output: {
         printGuidedError: () => {},
         printSuccess: () => {},

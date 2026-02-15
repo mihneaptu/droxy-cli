@@ -89,10 +89,22 @@ function createInteractiveApi(overrides = {}) {
     const providerId = providerGroup && providerGroup.id ? providerGroup.id : "";
     if (!providerId) return [];
 
+    const filterToProviderModels = (ids) =>
+      normalizeModelIds(ids).filter((modelId) => providerGroup.models.includes(modelId));
+
     const droidIds = Array.isArray(droidSyncedByProvider[providerId])
       ? droidSyncedByProvider[providerId]
       : [];
-    return normalizeModelIds(droidIds).filter((modelId) => providerGroup.models.includes(modelId));
+    const droidMatches = filterToProviderModels(droidIds);
+    if (droidMatches.length) return droidMatches;
+    if (Object.prototype.hasOwnProperty.call(droidSyncedByProvider, providerId)) {
+      return [];
+    }
+
+    const persistedIds = Array.isArray(persistedByProvider[providerId])
+      ? persistedByProvider[providerId]
+      : [];
+    return filterToProviderModels(persistedIds);
   }
   async function chooseModelsFlow() {
     const spinner = createSpinner("Fetching available models...").start();

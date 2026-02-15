@@ -59,12 +59,111 @@ function createProxyApi(overrides = {}) {
     }
   }
 
-  function hasProviderAuth() {
+  function normalizeConnectionState(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "connected") return "connected";
+    if (normalized === "disconnected") return "disconnected";
+    return "unknown";
+  }
+
+  function normalizeProviderStatusEntry(value) {
+    if (!value || typeof value !== "object") {
+      return {
+        connected: false,
+        connectionState: "unknown",
+        connectionCount: 0,
+        verified: false,
+      };
+    }
+
+    const connectionState = normalizeConnectionState(
+      value.connectionState ||
+      value.status ||
+      value.state ||
+      (
+        value.connected === true
+          ? "connected"
+          : value.connected === false
+            ? "disconnected"
+            : "unknown"
+      )
+    );
+    const countRaw = Number(value.connectionCount || value.count || 0);
+    const connectionCount =
+      connectionState === "connected"
+        ? Math.max(1, Number.isFinite(countRaw) ? Math.floor(countRaw) : 1)
+        : Math.max(0, Number.isFinite(countRaw) ? Math.floor(countRaw) : 0);
+    return {
+      connected: connectionState === "connected",
+      connectionState,
+      connectionCount,
+      verified: value.verified === true || connectionState !== "unknown",
+    };
+  }
+
+  function parseNonNegativeIntegerOrNull(value) {
+    const numberValue = Number(value);
+    if (Number.isFinite(numberValue) && numberValue >= 0) {
+      return Math.floor(numberValue);
+    }
+    return null;
+  }
+
+  function hasProviderAuth(providerId = "", providerStatusById = {}) {
+    const provider = String(providerId || "").trim().toLowerCase();
+    const byProvider = providerStatusById && typeof providerStatusById === "object"
+      ? providerStatusById
+      : {};
+    if (provider) {
+      const normalized = normalizeProviderStatusEntry(byProvider[provider]);
+      return normalized.connectionCount > 0 || normalized.connected;
+    }
+
+    for (const value of Object.values(byProvider)) {
+      const normalized = normalizeProviderStatusEntry(value);
+      if (normalized.connectionCount > 0 || normalized.connected) return true;
+    }
     return false;
   }
 
-  function countConnectedProviders() {
-    return 0;
+  function countConnectedProviders(providerStatusById = {}) {
+    const byProvider = providerStatusById && typeof providerStatusById === "object"
+      ? providerStatusById
+      : {};
+    let connected = 0;
+    for (const value of Object.values(byProvider)) {
+      if (normalizeProviderStatusEntry(value).connected) {
+        connected += 1;
+      }
+    }
+    return connected;
+  }
+
+  async function resolveProviderStatusSummary(configValues, state) {
+    const providerStatus =
+      sync && typeof sync.fetchProviderConnectionStatusSafe === "function"
+        ? await sync.fetchProviderConnectionStatusSafe(configValues, { state, quiet: true })
+        : { providersState: "unknown", providersConnected: 0, byProvider: {} };
+
+    const providerStatusById = {};
+    const rawProviderStatusById =
+      providerStatus && providerStatus.byProvider && typeof providerStatus.byProvider === "object"
+        ? providerStatus.byProvider
+        : {};
+    for (const [providerId, value] of Object.entries(rawProviderStatusById)) {
+      const normalizedId = String(providerId || "").trim().toLowerCase();
+      if (!normalizedId) continue;
+      providerStatusById[normalizedId] = normalizeProviderStatusEntry(value);
+    }
+
+    const providersState =
+      providerStatus && providerStatus.providersState === "verified" ? "verified" : "unknown";
+    const providersConnected = countConnectedProviders(providerStatusById);
+    return {
+      providersState,
+      providersConnected,
+      providerStatusById,
+    };
   }
 
   async function getProxyStatus(host, port) {
@@ -294,26 +393,45 @@ function createProxyApi(overrides = {}) {
 
     const values = config.readConfigValues();
     const status = await getProxyStatus(values.host, values.port);
+    const state = config.readState() || {};
 
     if (check) {
-      if (!status.running) process.exitCode = 1;
-      return { running: status.running, blocked: status.blocked };
+      if (!status.running) {
+        process.exitCode = 1;
+        return { running: false, blocked: status.blocked, providersState: "unknown", strictReady: false };
+      }
+      const providerSummary = await resolveProviderStatusSummary(values, state);
+      const strictReady = providerSummary.providersState === "verified";
+      if (!strictReady) process.exitCode = 1;
+      return {
+        running: true,
+        blocked: status.blocked,
+        providersState: providerSummary.providersState,
+        strictReady,
+      };
     }
 
-    const state = config.readState() || {};
-    const providerStatus =
-      sync && typeof sync.fetchProviderConnectionStatusSafe === "function"
-        ? await sync.fetchProviderConnectionStatusSafe(values, { state, quiet: true })
-        : { providersState: "unknown", providersConnected: 0, byProvider: {} };
-    const providersConnectedRaw = Number(providerStatus && providerStatus.providersConnected);
-    const providersConnected =
-      Number.isFinite(providersConnectedRaw) && providersConnectedRaw >= 0
-        ? Math.floor(providersConnectedRaw)
-        : 0;
-    const providersState =
-      providerStatus && providerStatus.providersState === "verified" ? "verified" : "unknown";
+    const providerSummary = await resolveProviderStatusSummary(values, state);
+    const providerStatusById = providerSummary.providerStatusById;
+    const providersConnected = providerSummary.providersConnected;
+    const providersState = providerSummary.providersState;
+    const strictReady = providersState === "verified";
+    const authDir = config.resolveAuthDir(values.authDir);
+    const authFiles = listAuthFiles(authDir);
+    const thinkingStatus =
+      state && state.thinkingStatus && typeof state.thinkingStatus === "object"
+        ? state.thinkingStatus
+        : {};
     const thinkingState =
-      state && state.thinkingState === "verified" ? "verified" : "unknown";
+      thinkingStatus.state === "verified" || (state && state.thinkingState === "verified")
+        ? "verified"
+        : "unknown";
+    const thinkingReason = String(thinkingStatus.reason || "").trim() || "";
+    const thinkingModelsTotal = parseNonNegativeIntegerOrNull(thinkingStatus.modelsTotal);
+    const thinkingModelsVerified = parseNonNegativeIntegerOrNull(thinkingStatus.modelsVerified);
+    const thinkingModelsSupported = parseNonNegativeIntegerOrNull(thinkingStatus.modelsSupported);
+    const thinkingModelsUnsupported = parseNonNegativeIntegerOrNull(thinkingStatus.modelsUnsupported);
+    const thinkingModelsUnverified = parseNonNegativeIntegerOrNull(thinkingStatus.modelsUnverified);
 
     let uptime = null;
     if (status.running && state.startedAt) {
@@ -324,7 +442,13 @@ function createProxyApi(overrides = {}) {
       }
     }
 
-    const statusState = status.blocked ? "blocked" : status.running ? "running" : "stopped";
+    const statusState = status.blocked
+      ? "blocked"
+      : status.running
+        ? strictReady
+          ? "running"
+          : "unverified"
+        : "stopped";
     const data = {
       status: statusState,
       host: values.host,
@@ -335,7 +459,16 @@ function createProxyApi(overrides = {}) {
       providers: providersConnected,
       providersConnected,
       providersState,
+      strictReady,
+      providerStatusById,
+      authFilesCount: authFiles.length,
       thinkingState,
+      thinkingReason: thinkingReason || null,
+      thinkingModelsTotal,
+      thinkingModelsVerified,
+      thinkingModelsSupported,
+      thinkingModelsUnsupported,
+      thinkingModelsUnverified,
     };
 
     if (json) {
@@ -347,13 +480,34 @@ function createProxyApi(overrides = {}) {
       output.log(`Status:    ${statusState}`);
       output.log(`Endpoint:  ${(values.tlsEnabled ? "https" : "http")}://${values.host}:${values.port}/v1`);
       output.log(`Providers: ${providersConnected} (${providersState})`);
+      if (!strictReady) {
+        output.printWarning("Provider verification is unverified. Strict checks will fail until backend verification is available.");
+      }
       output.log(`Thinking:  ${thinkingState}`);
+      if (verbose && thinkingReason) {
+        output.log(`Thinking reason: ${thinkingReason}`);
+      }
       if (status.pid) output.log(`PID:       ${status.pid}`);
       if (uptime) output.log(`Uptime:    ${uptime}`);
       if (verbose) {
         output.log(`State:     ${config.getStatePath()}`);
-        output.log(`Auth dir:  ${config.resolveAuthDir(values.authDir)}`);
+        output.log(`Auth dir:  ${authDir}`);
+        output.log(`Auth files:${authFiles.length}`);
         output.log(`Binary:    ${getBinaryPath()}`);
+        const providerIds = Object.keys(providerStatusById).sort((left, right) =>
+          left.localeCompare(right)
+        );
+        if (providerIds.length) {
+          output.log("Providers detail:");
+          for (const providerId of providerIds) {
+            const provider = providerStatusById[providerId];
+            const connectionCount = Number(provider.connectionCount) || 0;
+            const connectionState = provider.connectionState || "unknown";
+            const verificationLabel = provider.verified ? "verified" : "unverified";
+            const details = `${connectionCount} account${connectionCount === 1 ? "" : "s"}, ${verificationLabel}`;
+            output.log(`  ${providerId}: ${connectionState} (${details})`);
+          }
+        }
       }
     }
 
